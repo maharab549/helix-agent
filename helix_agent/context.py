@@ -7,6 +7,7 @@ from pathlib import Path
 CONTEXT_FILES = [
     "AGENTS.md",
     "HELIX.md",
+    ".helix/LEARNED.md",
     ".helix/CONTEXT.md",
     ".helix/context.md",
     "README.md",

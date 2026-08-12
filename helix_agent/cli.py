@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Sequence
 
 from . import __version__
@@ -13,6 +15,18 @@ from .config import init_config, load_config, save_config, set_config_value
 from .context import collect_context_blocks, format_workspace_context
 from .doctor import collect_diagnostics
 from .history import list_history, save_exchange
+from .learning import (
+    build_dataset,
+    capture_exchange,
+    capture_prompt_response,
+    distill_learned_profile,
+    iter_learning_examples,
+    learning_stats,
+    mine_history,
+    set_learning_enabled,
+    update_example_rating,
+    validate_dataset,
+)
 from .memory import iter_memories, remember, search_memories
 from .missions import build_mission_prompt, create_mission, list_missions, load_mission, save_mission
 from .output import Palette, format_table, print_json
@@ -23,6 +37,7 @@ from .scheduler import add_job, load_jobs, remove_job, run_due_jobs
 from .sessions import create_session, export_markdown, list_sessions, load_session
 from .skills import create_project_skill, find_skill, load_skill_index, read_skill, save_index, search_skills
 from .subagents import run_subagents
+from .tuning import adopt_fine_tuned_model, auto_fine_tune, list_fine_tune_jobs, load_records, refresh_record, start_fine_tune
 from .tools_runtime import TOOL_DESCRIPTIONS, execute_tool
 
 
@@ -37,6 +52,7 @@ COMMANDS = {
     "doctor",
     "history",
     "init",
+    "learn",
     "memory",
     "mission",
     "plugins",
@@ -46,6 +62,7 @@ COMMANDS = {
     "sessions",
     "skills",
     "subagents",
+    "finetune",
     "tools",
     "version",
 }
@@ -142,6 +159,34 @@ def build_parser() -> argparse.ArgumentParser:
     history = sub.add_parser("history", help="List saved exchanges")
     history.add_argument("--limit", type=int, default=20)
 
+    learn = sub.add_parser("learn", help="Automatic learning and training data")
+    learn_sub = learn.add_subparsers(dest="learn_command")
+    learn_sub.add_parser("status")
+    learn_on = learn_sub.add_parser("on")
+    learn_on.add_argument("--mine-history", action="store_true")
+    learn_sub.add_parser("off")
+    learn_add = learn_sub.add_parser("add")
+    learn_add.add_argument("--rating", type=int, default=None)
+    learn_add.add_argument("--tag", action="append", default=[])
+    learn_add.add_argument("--response", required=True)
+    learn_add.add_argument("prompt", nargs=argparse.REMAINDER)
+    learn_rate = learn_sub.add_parser("rate")
+    learn_rate.add_argument("example")
+    learn_rate.add_argument("rating", type=int)
+    learn_list = learn_sub.add_parser("list")
+    learn_list.add_argument("--limit", type=int, default=20)
+    learn_mine = learn_sub.add_parser("mine-history")
+    learn_mine.add_argument("--limit", type=int, default=200)
+    learn_dataset = learn_sub.add_parser("dataset")
+    learn_dataset.add_argument("--output", default=None)
+    learn_dataset.add_argument("--min-rating", type=int, default=None)
+    learn_dataset.add_argument("--min-score", type=float, default=None)
+    learn_dataset.add_argument("--limit", type=int, default=1000)
+    learn_dataset.add_argument("--include-system", action="store_true")
+    learn_validate = learn_sub.add_parser("validate")
+    learn_validate.add_argument("path")
+    learn_sub.add_parser("distill")
+
     sessions = sub.add_parser("sessions", help="Manage persistent chat sessions")
     sessions_sub = sessions.add_subparsers(dest="sessions_command")
     sessions_sub.add_parser("list")
@@ -193,6 +238,42 @@ def build_parser() -> argparse.ArgumentParser:
     subagents.add_argument("--task", action="append", default=[], help="name=prompt; repeatable")
     subagents.add_argument("--timeout", type=int, default=120)
     subagents.add_argument("prompt", nargs=argparse.REMAINDER)
+
+    finetune = sub.add_parser("finetune", help="Prepare and run fine-tuning jobs")
+    finetune_sub = finetune.add_subparsers(dest="finetune_command")
+    ft_prepare = finetune_sub.add_parser("prepare")
+    ft_prepare.add_argument("--output", default=None)
+    ft_prepare.add_argument("--min-rating", type=int, default=None)
+    ft_prepare.add_argument("--min-score", type=float, default=None)
+    ft_prepare.add_argument("--limit", type=int, default=1000)
+    ft_prepare.add_argument("--include-system", action="store_true")
+    ft_start = finetune_sub.add_parser("start")
+    add_model_options(ft_start)
+    ft_start.add_argument("--dataset", required=True)
+    ft_start.add_argument("--base-model", required=True)
+    ft_start.add_argument("--n-epochs", type=int, default=None)
+    ft_start.add_argument("--dry-run", action="store_true")
+    ft_start.add_argument("--timeout", type=int, default=120)
+    ft_auto = finetune_sub.add_parser("auto")
+    add_model_options(ft_auto)
+    ft_auto.add_argument("--base-model", required=True)
+    ft_auto.add_argument("--min-rating", type=int, default=None)
+    ft_auto.add_argument("--min-score", type=float, default=None)
+    ft_auto.add_argument("--limit", type=int, default=1000)
+    ft_auto.add_argument("--min-examples", type=int, default=1)
+    ft_auto.add_argument("--mine-history", type=int, default=0)
+    ft_auto.add_argument("--distill", action="store_true")
+    ft_auto.add_argument("--n-epochs", type=int, default=None)
+    ft_auto.add_argument("--dry-run", action="store_true")
+    ft_auto.add_argument("--timeout", type=int, default=120)
+    ft_status = finetune_sub.add_parser("status")
+    ft_status.add_argument("job", nargs="?")
+    ft_status.add_argument("--provider", default=None)
+    ft_status.add_argument("--timeout", type=int, default=120)
+    ft_adopt = finetune_sub.add_parser("adopt")
+    ft_adopt.add_argument("job")
+    ft_adopt.add_argument("--provider", default="openai")
+    ft_adopt.add_argument("--name", default="helix-tuned")
 
     schedule = sub.add_parser("schedule", help="Manage recurring prompts")
     schedule_sub = schedule.add_subparsers(dest="schedule_command")
@@ -281,6 +362,7 @@ def run_ask(config, ns, palette: Palette) -> int:
         print(result.content)
     if not ns.no_save:
         save_exchange(messages, result.content, provider=result.provider, model=result.model)
+        capture_exchange(messages, result.content, provider=result.provider, model=result.model, source="ask")
     return 0
 
 
@@ -346,6 +428,7 @@ def run_chat(config, ns, palette: Palette) -> int:
         messages.append({"role": "assistant", "content": result.content})
         print(palette.green("helix> ") + result.content)
         save_exchange(messages[-3:] if len(messages) > 3 else messages, result.content, provider=result.provider, model=result.model)
+        capture_exchange(messages[-3:] if len(messages) > 3 else messages, result.content, provider=result.provider, model=result.model, source="chat")
 
 
 def handle_chat_command(command: str, messages: list[dict[str, str]], config, palette: Palette) -> bool:
@@ -563,6 +646,76 @@ def run_memory(ns) -> int:
     return 0
 
 
+def run_learn(ns) -> int:
+    if ns.learn_command in {None, "status"}:
+        print_json(learning_stats())
+        return 0
+    if ns.learn_command == "on":
+        print(set_learning_enabled(True))
+        if ns.mine_history:
+            print(f"Mined {mine_history()} examples from history.")
+        return 0
+    if ns.learn_command == "off":
+        print(set_learning_enabled(False))
+        return 0
+    if ns.learn_command == "add":
+        prompt = prompt_from_parts(ns.prompt)
+        if not prompt:
+            print("Prompt is required.", file=sys.stderr)
+            return 2
+        example = capture_prompt_response(
+            prompt,
+            ns.response,
+            rating=ns.rating,
+            tags=ns.tag,
+            source="manual",
+            force=True,
+        )
+        if example is None:
+            print("Example was skipped by learning filters.", file=sys.stderr)
+            return 1
+        print_json(example.to_json())
+        return 0
+    if ns.learn_command == "rate":
+        print_json(update_example_rating(ns.example, ns.rating).to_json())
+        return 0
+    if ns.learn_command == "list":
+        examples = iter_learning_examples()[: ns.limit]
+        rows = [
+            {
+                "id": example.id,
+                "rating": example.rating if example.rating is not None else "",
+                "score": example.score,
+                "source": example.source,
+                "prompt": example.prompt[:70],
+            }
+            for example in examples
+        ]
+        print(format_table(rows, [("id", "ID"), ("rating", "Rating"), ("score", "Score"), ("source", "Source"), ("prompt", "Prompt")]))
+        return 0
+    if ns.learn_command == "mine-history":
+        print(f"Mined {mine_history(limit=ns.limit)} examples from history.")
+        return 0
+    if ns.learn_command == "dataset":
+        stats = build_dataset(
+            output=None if ns.output is None else Path(ns.output),
+            min_rating=ns.min_rating,
+            min_score=ns.min_score,
+            limit=ns.limit,
+            include_system=ns.include_system,
+        )
+        print_json(stats.to_json())
+        return 0
+    if ns.learn_command == "validate":
+        validation = validate_dataset(Path(ns.path))
+        print_json(validation.to_json())
+        return 0 if validation.ok else 1
+    if ns.learn_command == "distill":
+        print(distill_learned_profile())
+        return 0
+    return 2
+
+
 def run_tools(ns) -> int:
     if ns.tools_command in {None, "list"}:
         print(format_table(
@@ -652,6 +805,64 @@ def run_capabilities(ns, palette: Palette) -> int:
         [("area", "Area"), ("name", "Capability"), ("status", "Status"), ("description", "Description")],
     ))
     return 0
+
+
+def run_finetune_cmd(config, ns) -> int:
+    if ns.finetune_command in {None, "prepare"}:
+        stats = build_dataset(
+            output=None if getattr(ns, "output", None) is None else Path(ns.output),
+            min_rating=getattr(ns, "min_rating", None),
+            min_score=getattr(ns, "min_score", None),
+            limit=getattr(ns, "limit", 1000),
+            include_system=getattr(ns, "include_system", False),
+        )
+        print_json(stats.to_json())
+        return 0
+    if ns.finetune_command == "start":
+        result = start_fine_tune(
+            config,
+            Path(ns.dataset),
+            provider_name=ns.provider,
+            base_model=ns.base_model,
+            n_epochs=ns.n_epochs,
+            dry_run=ns.dry_run,
+            timeout=ns.timeout,
+        )
+        print_json(result)
+        return 0 if result.get("ok") else 1
+    if ns.finetune_command == "auto":
+        result = auto_fine_tune(
+            config,
+            provider_name=ns.provider,
+            base_model=ns.base_model,
+            min_rating=ns.min_rating,
+            min_score=ns.min_score,
+            limit=ns.limit,
+            min_examples=ns.min_examples,
+            mine_history_limit=ns.mine_history,
+            distill=ns.distill,
+            n_epochs=ns.n_epochs,
+            dry_run=ns.dry_run,
+            timeout=ns.timeout,
+        )
+        print_json(result)
+        return 0 if result.get("ok") else 1
+    if ns.finetune_command == "status":
+        if ns.job:
+            data = refresh_record(config, ns.job, provider_name=ns.provider, timeout=ns.timeout)
+            print_json(data)
+            return 0
+        provider = config.providers.get(ns.provider or "openai")
+        if provider and provider.api_key_env and provider.api_key_env in os.environ:
+            print_json(list_fine_tune_jobs(provider, timeout=ns.timeout))
+        else:
+            print_json([record.to_json() for record in load_records()])
+        return 0
+    if ns.finetune_command == "adopt":
+        record = adopt_fine_tuned_model(config, ns.job, provider_name=ns.provider, new_provider_name=ns.name)
+        print_json(record.to_json())
+        return 0
+    return 2
 
 
 def run_subagents_cmd(config, ns) -> int:
@@ -766,6 +977,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_mission(config, ns, palette)
         if ns.command == "sessions":
             return run_sessions(ns)
+        if ns.command == "learn":
+            return run_learn(ns)
         if ns.command == "memory":
             return run_memory(ns)
         if ns.command == "tools":
@@ -774,6 +987,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_plugins(ns)
         if ns.command == "subagents":
             return run_subagents_cmd(config, ns)
+        if ns.command == "finetune":
+            return run_finetune_cmd(config, ns)
         if ns.command == "schedule":
             return run_schedule_cmd(config, ns)
         if ns.command == "history":

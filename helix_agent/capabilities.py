@@ -3,8 +3,8 @@ from __future__ import annotations
 
 STANDOUT = (
     "Helix is an owner-controlled agent OS for the terminal: a provider-agnostic core loop "
-    "that combines project context, memory, skills, tools, plugins, sessions, missions, "
-    "subagents, schedules, and RPC in plain local files."
+    "that combines project context, memory, automatic learning, fine-tuning automation, "
+    "skills, tools, plugins, sessions, missions, subagents, schedules, and RPC in plain local files."
 )
 
 
@@ -44,6 +44,24 @@ CAPABILITIES = [
         "name": "Memory",
         "status": "available",
         "description": "Project and global JSONL memory with search and agent recall.",
+    },
+    {
+        "area": "Learning",
+        "name": "Automatic learning",
+        "status": "available",
+        "description": "Captures successful interactions, redacts secrets, scores examples, and supports ratings.",
+    },
+    {
+        "area": "Learning",
+        "name": "Dataset curation",
+        "status": "available",
+        "description": "Mines history, exports chat JSONL, validates datasets, and distills .helix/LEARNED.md.",
+    },
+    {
+        "area": "Learning",
+        "name": "Fine-tuning automation",
+        "status": "available",
+        "description": "Prepares datasets, uploads OpenAI training files, creates jobs, checks status, and adopts tuned models.",
     },
     {
         "area": "Tools",

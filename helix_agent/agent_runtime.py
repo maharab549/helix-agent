@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .config import AgentConfig
 from .context import format_workspace_context
+from .learning import capture_prompt_response
 from .memory import format_memory_context
 from .provider import ChatResult, complete
 from .sessions import Session, append_message, create_session, save_session
@@ -119,6 +120,14 @@ def run_agent_loop(
         active_session.model = final.model
     if save:
         save_session(active_session)
+        capture_prompt_response(
+            prompt,
+            content,
+            provider=final.provider if final else "",
+            model=final.model if final else "",
+            source="agent",
+            metadata={"session": active_session.id, "tool_steps": len(tool_steps)},
+        )
     return AgentRunResult(
         content=content,
         provider=final.provider if final else "",

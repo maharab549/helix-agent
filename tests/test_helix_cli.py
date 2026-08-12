@@ -6,12 +6,22 @@ from pathlib import Path
 
 from helix_agent.config import load_config
 from helix_agent.context import collect_context_blocks, format_workspace_context
+from helix_agent.learning import (
+    build_dataset,
+    capture_prompt_response,
+    distill_learned_profile,
+    learning_stats,
+    set_learning_enabled,
+    update_example_rating,
+    validate_dataset,
+)
 from helix_agent.memory import remember, search_memories
 from helix_agent.plugins import create_project_plugin, execute_plugin_tool, load_plugins
 from helix_agent.provider import resolve_provider
 from helix_agent.rpc import handle_rpc_request
 from helix_agent.sessions import append_message, create_session, export_markdown, load_session
 from helix_agent.skills import load_skill_index, search_skills
+from helix_agent.tuning import auto_fine_tune, fine_tune_payload
 from helix_agent.tools_runtime import execute_tool, parse_tool_calls, strip_tool_calls
 
 
@@ -101,6 +111,78 @@ class HelixCliTests(unittest.TestCase):
             )
             self.assertTrue(response["ok"])
             self.assertIn("rpc works", response["result"]["output"])
+
+    def test_learning_capture_dataset_and_distill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            set_learning_enabled(True, cwd=root)
+            example = capture_prompt_response(
+                "How should Helix answer coding requests?",
+                "Helix should inspect files, make focused edits, and run tests before summarizing.",
+                rating=5,
+                tags=["style"],
+                force=True,
+                cwd=root,
+            )
+            self.assertIsNotNone(example)
+            self.assertEqual(learning_stats(cwd=root)["examples"], 1)
+            rated = update_example_rating(example.id, 4, cwd=root)
+            self.assertEqual(rated.rating, 4)
+            dataset = build_dataset(cwd=root, min_rating=4)
+            self.assertEqual(dataset.examples, 1)
+            validation = validate_dataset(dataset.path)
+            self.assertTrue(validation.ok)
+            profile = distill_learned_profile(cwd=root)
+            self.assertTrue(profile.exists())
+
+    def test_fine_tune_payload_and_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            capture_prompt_response(
+                "Make a release checklist",
+                "Inspect status, run tests, update docs, tag the release, and publish.",
+                rating=5,
+                force=True,
+                cwd=root,
+            )
+            payload = fine_tune_payload(training_file="file-123", base_model="gpt-4.1-mini", n_epochs=1)
+            self.assertEqual(payload["training_file"], "file-123")
+            config = load_config(cwd=root)
+            result = auto_fine_tune(config, provider_name="openai", base_model="gpt-4.1-mini", dry_run=True, cwd=root)
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["dry_run"])
+            blocked = auto_fine_tune(
+                config,
+                provider_name="openai",
+                base_model="gpt-4.1-mini",
+                min_examples=2,
+                dry_run=True,
+                cwd=root,
+            )
+            self.assertFalse(blocked["ok"])
+            self.assertIn("Need at least 2", blocked["reason"])
+
+    def test_rpc_learning_dataset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = load_config(cwd=root)
+            added = handle_rpc_request(
+                config,
+                {
+                    "id": 3,
+                    "method": "learn.add",
+                    "params": {
+                        "prompt": "How does Helix learn?",
+                        "response": "It captures useful examples, redacts secrets, rates them, and exports JSONL datasets.",
+                        "rating": 5,
+                    },
+                },
+                cwd=root,
+            )
+            self.assertTrue(added["ok"])
+            dataset = handle_rpc_request(config, {"id": 4, "method": "learn.dataset", "params": {"min_rating": 5}}, cwd=root)
+            self.assertTrue(dataset["ok"])
+            self.assertEqual(dataset["result"]["examples"], 1)
 
 
 if __name__ == "__main__":

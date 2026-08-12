@@ -8,10 +8,12 @@ from typing import Any, TextIO
 from .agent_runtime import build_messages, run_agent_loop
 from .config import AgentConfig
 from .context import collect_context_blocks
+from .learning import build_dataset, capture_exchange, capture_prompt_response, learning_stats, mine_history, update_example_rating
 from .memory import remember, search_memories
 from .plugins import PluginError
 from .provider import ProviderError, complete
 from .skills import load_skill_index, search_skills
+from .tuning import auto_fine_tune, start_fine_tune
 from .tools_runtime import execute_tool
 
 
@@ -56,6 +58,7 @@ def handle_rpc_request(config: AgentConfig, request: dict[str, Any], *, cwd: Pat
                 temperature=float(params.get("temperature") or 0.2),
                 timeout=int(params.get("timeout") or 120),
             )
+            capture_exchange(messages, result.content, provider=result.provider, model=result.model, source="rpc.ask", cwd=root)
             return _response(
                 request_id,
                 ok=True,
@@ -130,6 +133,73 @@ def handle_rpc_request(config: AgentConfig, request: dict[str, Any], *, cwd: Pat
         if method == "memory.search":
             entries = search_memories(str(params.get("query") or ""), limit=int(params.get("limit") or 10), cwd=root)
             return _response(request_id, ok=True, result=[entry.to_json() for entry in entries])
+
+        if method == "learn.status":
+            return _response(request_id, ok=True, result=learning_stats(cwd=root))
+
+        if method == "learn.add":
+            example = capture_prompt_response(
+                str(params.get("prompt") or ""),
+                str(params.get("response") or ""),
+                rating=params.get("rating"),
+                tags=[str(tag) for tag in params.get("tags") or []],
+                source="rpc",
+                force=True,
+                cwd=root,
+            )
+            if example is None:
+                return _response(request_id, ok=False, error="Learning example was skipped")
+            return _response(request_id, ok=True, result=example.to_json())
+
+        if method == "learn.rate":
+            example = update_example_rating(str(params.get("id") or ""), int(params.get("rating") or 0), cwd=root)
+            return _response(request_id, ok=True, result=example.to_json())
+
+        if method == "learn.mine_history":
+            return _response(request_id, ok=True, result={"examples": mine_history(limit=int(params.get("limit") or 200), cwd=root)})
+
+        if method == "learn.dataset":
+            dataset = build_dataset(
+                output=Path(params["output"]) if params.get("output") else None,
+                min_rating=params.get("min_rating"),
+                min_score=params.get("min_score"),
+                limit=int(params.get("limit") or 1000),
+                include_system=bool(params.get("include_system")),
+                cwd=root,
+            )
+            return _response(request_id, ok=True, result=dataset.to_json())
+
+        if method == "finetune.start":
+            dataset = Path(str(params.get("dataset") or ""))
+            result = start_fine_tune(
+                config,
+                dataset,
+                provider_name=params.get("provider"),
+                base_model=str(params.get("base_model") or ""),
+                n_epochs=params.get("n_epochs"),
+                dry_run=bool(params.get("dry_run")),
+                timeout=int(params.get("timeout") or 120),
+                cwd=root,
+            )
+            return _response(request_id, ok=bool(result.get("ok")), result=result, error=json.dumps(result))
+
+        if method == "finetune.auto":
+            result = auto_fine_tune(
+                config,
+                provider_name=params.get("provider"),
+                base_model=str(params.get("base_model") or ""),
+                min_rating=params.get("min_rating"),
+                min_score=params.get("min_score"),
+                limit=int(params.get("limit") or 1000),
+                min_examples=int(params.get("min_examples") or 1),
+                mine_history_limit=int(params.get("mine_history") or 0),
+                distill=bool(params.get("distill")),
+                n_epochs=params.get("n_epochs"),
+                dry_run=bool(params.get("dry_run")),
+                timeout=int(params.get("timeout") or 120),
+                cwd=root,
+            )
+            return _response(request_id, ok=bool(result.get("ok")), result=result, error=json.dumps(result))
 
         if method == "context":
             blocks = collect_context_blocks(cwd=root, max_chars=int(params.get("max_chars") or 12000))

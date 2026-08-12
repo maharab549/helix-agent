@@ -10,6 +10,7 @@ from typing import Any
 
 from .config import AgentConfig
 from .history import save_exchange
+from .learning import capture_exchange
 from .paths import project_state_dir
 from .provider import ProviderError, complete
 
@@ -96,6 +97,7 @@ def run_due_jobs(config: AgentConfig, *, force: bool = False, timeout: int = 120
             result = complete(config, messages, provider_name=job.provider, model=job.model, timeout=timeout)
             job.last_result = result.content
             save_exchange(messages, result.content, provider=result.provider, model=result.model)
+            capture_exchange(messages, result.content, provider=result.provider, model=result.model, source="schedule", metadata={"job": job.id})
         except ProviderError as exc:
             job.last_result = f"ERROR: {exc}"
         job.next_run = current + job.every_seconds

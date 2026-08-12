@@ -2,7 +2,7 @@
 
 Helix Agent is a standalone CLI AI agent. It works with OpenAI-compatible chat APIs, OpenRouter, custom endpoints, and local Ollama models without depending on any other agent repo.
 
-It is designed to bring the useful ideas from larger agents into a clean independent project: persistent sessions, skills, memory, local tools, autonomous tool loops, subagents, recurring prompts, project missions, plugins, workspace context, and JSONL automation.
+It is designed to bring the useful ideas from larger agents into a clean independent project: persistent sessions, skills, memory, automatic learning, fine-tuning automation, local tools, autonomous tool loops, subagents, recurring prompts, project missions, plugins, workspace context, and JSONL automation.
 
 ## What Makes Helix Different
 
@@ -14,10 +14,12 @@ The main feature is the Helix Core Loop:
 
 - it reads project context from files such as `AGENTS.md`, `HELIX.md`, `.helix/CONTEXT.md`, and `README.md`
 - it recalls project and global memory
+- it learns from successful interactions and can write `.helix/LEARNED.md`
 - it loads reusable skills
 - it can call local tools, Git tools, HTTP fetches, and plugin tools
 - it saves sessions and history so work can continue later
 - it can split work across subagents or recurring schedules
+- it can curate fine-tuning datasets and start provider fine-tune jobs
 - it can be controlled by another program through JSONL RPC
 
 That is the reason Helix can stand apart: it is not only a chatbot in your shell; it is a hackable local agent platform.
@@ -81,6 +83,12 @@ helix ask "your prompt"             # one-shot prompt
 helix agent "inspect this repo"      # autonomous loop with local tools
 helix agent --yes "create tests"     # allow writes/shell/python tools
 helix capabilities                  # show Helix's feature map
+helix learn status
+helix learn mine-history
+helix learn dataset --min-rating 4
+helix learn distill
+helix finetune prepare --min-rating 4
+helix finetune auto --base-model gpt-4.1-mini --mine-history 200 --distill --dry-run
 helix ask --skill code-review "review this change"
 helix providers list
 helix context show
@@ -167,6 +175,38 @@ Plugin tools are available to `helix agent` through the built-in `plugin` tool. 
 
 Supported methods include `ping`, `ask`, `agent`, `tool`, `skills.list`, `skills.search`, `memory.add`, `memory.search`, and `context`.
 
+## Automatic Learning
+
+Helix can automatically capture successful `ask`, `chat`, and `agent` exchanges into `.helix/learning/examples.jsonl`. Captured examples are redacted for obvious secrets, scored, and deduplicated. You can rate examples, mine older history, build fine-tuning datasets, and distill a local learned profile.
+
+```powershell
+helix learn status
+helix learn on --mine-history
+helix learn add --rating 5 --tag style --response "Use concise verification notes." "How should Helix summarize work?"
+helix learn list
+helix learn rate <example-id> 5
+helix learn dataset --min-rating 4
+helix learn validate .helix/learning/datasets/<file>.jsonl
+helix learn distill
+```
+
+`helix learn distill` writes `.helix/LEARNED.md`, and Helix loads that file as workspace context on later runs.
+
+## Fine-Tuning
+
+Helix includes an OpenAI-compatible fine-tuning pipeline with no extra Python dependencies. The current OpenAI flow is: upload a JSONL training file with purpose `fine-tune`, create a fine-tuning job with a `training_file` and base `model`, then poll the job until a fine-tuned model is available.
+
+```powershell
+helix finetune prepare --min-rating 4
+helix finetune start --provider openai --dataset .helix/learning/datasets/<file>.jsonl --base-model gpt-4.1-mini --dry-run
+helix finetune start --provider openai --dataset .helix/learning/datasets/<file>.jsonl --base-model gpt-4.1-mini
+helix finetune auto --provider openai --base-model gpt-4.1-mini --mine-history 200 --distill --min-examples 20 --dry-run
+helix finetune status <job-id>
+helix finetune adopt <job-id> --name helix-tuned
+```
+
+`--dry-run` validates the dataset and shows the job payload without uploading anything. Real fine-tuning requires `OPENAI_API_KEY` and can incur provider costs.
+
 ## Feature Map
 
 Already available:
@@ -175,6 +215,10 @@ Already available:
 - one-shot ask, interactive chat, autonomous agent loop
 - project/user/built-in skills
 - project/global memory
+- automatic learning capture with redaction, scoring, rating, and deduplication
+- history mining and `.helix/LEARNED.md` distillation
+- JSONL fine-tuning dataset generation and validation
+- OpenAI training-file upload, fine-tune job creation, status refresh, and tuned-model adoption
 - sessions and markdown export
 - missions and recurring schedules
 - parallel subagents
@@ -202,6 +246,9 @@ Planned high-end layers:
 - Project state: `.helix/`
 - Project skills: `.helix/skills/<name>/SKILL.md`
 - Project plugins: `.helix/plugins/<name>/plugin.json`
+- Project learning examples: `.helix/learning/examples.jsonl`
+- Project learned profile: `.helix/LEARNED.md`
+- Project fine-tune records: `.helix/fine_tunes.json`
 - Project sessions: `.helix/sessions/`
 - Project memory: `.helix/memory.jsonl`
 - Project schedule: `.helix/schedule.json`
