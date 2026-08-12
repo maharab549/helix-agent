@@ -5,6 +5,7 @@ This extension connects VS Code to the local `helix` CLI.
 ## Features
 
 - `@helix` chat participant
+- Helix Activity Bar icon and sidebar panel
 - `@helix /map`, `/review`, `/explain`, `/fix`, `/learn`
 - Copilot agent-mode tool reference: `#helix`
 - `Helix: Ask`
@@ -13,6 +14,8 @@ This extension connects VS Code to the local `helix` CLI.
 - `Helix: Review Workspace`
 - `Helix: Explain Current File`
 - `Helix: Learning Status`
+
+After installing the VSIX, look for the Helix icon in the left Activity Bar. Open the Helix sidebar to run quick actions beside other coding agents.
 
 ## Requirements
 

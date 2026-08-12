@@ -237,6 +237,7 @@ The first-party VS Code extension lives in `integrations/vscode`.
 It adds:
 
 - `@helix` chat participant
+- Helix Activity Bar icon and sidebar panel
 - `@helix /map`, `/review`, `/explain`, `/fix`, `/learn`
 - Copilot agent-mode tool reference: `#helix`
 - `Helix: Ask`

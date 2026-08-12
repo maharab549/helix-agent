@@ -61,6 +61,7 @@
     "onCommand:helix.reviewWorkspace",
     "onCommand:helix.explainFile",
     "onCommand:helix.learnStatus",
+    "onView:helix.panel",
     "onLanguageModelTool:helix_workspace"
   ],
   "main": "./extension.js",
@@ -109,9 +110,49 @@
       {
         "command": "helix.learnStatus",
         "title": "Helix: Learning Status"
+      },
+      {
+        "command": "helix.openChat",
+        "title": "Helix: Open Chat"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "helix",
+          "title": "Helix",
+          "icon": "media/helix.svg"
+        }
+      ]
+    },
+    "views": {
+      "helix": [
+        {
+          "id": "helix.panel",
+          "name": "Helix Agent",
+          "icon": "media/helix.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "helix.panel",
+        "contents": "Run Helix from VS Code.\n[Ask Helix](command:helix.ask)\n[Review Workspace](command:helix.reviewWorkspace)\n[Open Chat](command:helix.openChat)"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "helix.ask",
+          "when": "view == helix.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "helix.reviewWorkspace",
+          "when": "view == helix.panel",
+          "group": "navigation@2"
+        }
+      ],
       "editor/context": [
         {
           "command": "helix.fixSelection",

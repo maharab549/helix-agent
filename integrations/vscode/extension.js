@@ -60,6 +60,41 @@ function outputChannel() {
   return vscode.window.createOutputChannel("Helix Agent");
 }
 
+class HelixActionItem extends vscode.TreeItem {
+  constructor(label, command, icon) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.command = command;
+    this.iconPath = new vscode.ThemeIcon(icon);
+  }
+}
+
+class HelixPanelProvider {
+  constructor() {
+    this._onDidChangeTreeData = new vscode.EventEmitter();
+    this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+  }
+
+  refresh() {
+    this._onDidChangeTreeData.fire();
+  }
+
+  getTreeItem(element) {
+    return element;
+  }
+
+  getChildren() {
+    return [
+      new HelixActionItem("Ask Helix", { command: "helix.ask", title: "Ask Helix" }, "comment-discussion"),
+      new HelixActionItem("Open @helix Chat", { command: "helix.openChat", title: "Open @helix Chat" }, "sparkle"),
+      new HelixActionItem("Review Workspace", { command: "helix.reviewWorkspace", title: "Review Workspace" }, "search"),
+      new HelixActionItem("Explain Current File", { command: "helix.explainFile", title: "Explain Current File" }, "file-code"),
+      new HelixActionItem("Fix Selection", { command: "helix.fixSelection", title: "Fix Selection" }, "wand"),
+      new HelixActionItem("Rewrite Selection", { command: "helix.rewriteSelection", title: "Rewrite Selection" }, "edit"),
+      new HelixActionItem("Learning Status", { command: "helix.learnStatus", title: "Learning Status" }, "graph")
+    ];
+  }
+}
+
 function activeRelativePath() {
   const editor = vscode.window.activeTextEditor;
   return editor ? vscode.workspace.asRelativePath(editor.document.uri) : "";
@@ -202,6 +237,14 @@ async function learnStatusCommand() {
   }
 }
 
+async function openChatCommand() {
+  try {
+    await vscode.commands.executeCommand("workbench.action.chat.open", "@helix ");
+  } catch (_error) {
+    await askCommand();
+  }
+}
+
 function registerChat(context) {
   if (!vscode.chat || !vscode.chat.createChatParticipant) {
     return;
@@ -270,12 +313,15 @@ function registerLanguageModelTools(context) {
 }
 
 function activate(context) {
+  const panelProvider = new HelixPanelProvider();
+  context.subscriptions.push(vscode.window.registerTreeDataProvider("helix.panel", panelProvider));
   context.subscriptions.push(vscode.commands.registerCommand("helix.ask", askCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.fixSelection", fixSelectionCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.rewriteSelection", rewriteSelectionCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.reviewWorkspace", reviewWorkspaceCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.explainFile", explainFileCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.learnStatus", learnStatusCommand));
+  context.subscriptions.push(vscode.commands.registerCommand("helix.openChat", openChatCommand));
   registerChat(context);
   registerLanguageModelTools(context);
 }
