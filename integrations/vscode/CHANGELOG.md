@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Expand the right-side panel into a Helix Command Center covering core, code, context, state, plugin, and fine-tuning workflows.
+- Add raw CLI argument runner inside VS Code.
+
 ## 0.1.1
 
 - Add right-side Helix Agent webview panel for a Codex/Claude-style layout beside the editor.

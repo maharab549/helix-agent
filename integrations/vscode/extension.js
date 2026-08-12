@@ -301,6 +301,20 @@ function rightPanelHtml(webview) {
       padding: 10px;
       font-family: var(--vscode-editor-font-family);
     }
+    .toolbar {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    select {
+      flex: 1;
+      min-width: 0;
+      color: var(--vscode-dropdown-foreground);
+      background: var(--vscode-dropdown-background);
+      border: 1px solid var(--vscode-dropdown-border);
+      border-radius: 4px;
+      padding: 7px;
+    }
     .actions {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -339,28 +353,79 @@ function rightPanelHtml(webview) {
     <div class="title">Helix Agent</div>
     <div class="status" id="status">Ready</div>
   </div>
+  <div class="toolbar">
+    <select id="command">
+      <optgroup label="Core">
+        <option value="ask">Ask</option>
+        <option value="agent">Agent Run</option>
+        <option value="chat">Open @helix Chat</option>
+        <option value="capabilities">Capabilities</option>
+        <option value="doctor">Doctor</option>
+      </optgroup>
+      <optgroup label="Code">
+        <option value="review">Review Workspace</option>
+        <option value="map">Map Workspace</option>
+        <option value="tests">Infer Tests</option>
+        <option value="explain">Explain Active File</option>
+        <option value="fix">Fix Task</option>
+      </optgroup>
+      <optgroup label="Context">
+        <option value="context">Workspace Context</option>
+        <option value="skills">Skills List</option>
+        <option value="skillsSearch">Skills Search</option>
+        <option value="tools">Tools List</option>
+        <option value="providers">Providers</option>
+      </optgroup>
+      <optgroup label="State">
+        <option value="memory">Memory List</option>
+        <option value="memorySearch">Memory Search</option>
+        <option value="learn">Learning Status</option>
+        <option value="sessions">Sessions</option>
+        <option value="missions">Missions</option>
+        <option value="schedule">Schedule</option>
+        <option value="history">History</option>
+      </optgroup>
+      <optgroup label="Extensions">
+        <option value="plugins">Plugins</option>
+        <option value="pluginTools">Plugin Tools</option>
+        <option value="finetunePrepare">Fine-tune Prepare</option>
+        <option value="finetuneAutoDryRun">Fine-tune Auto Dry Run</option>
+        <option value="raw">Raw Helix CLI Args</option>
+      </optgroup>
+    </select>
+    <button data-run-selected="true">Run</button>
+  </div>
   <textarea id="prompt" placeholder="Ask Helix about this workspace..."></textarea>
   <div class="actions">
     <button data-command="ask">Ask</button>
+    <button data-command="agent">Agent Run</button>
     <button data-command="review">Review Workspace</button>
     <button class="secondary" data-command="map">Map Workspace</button>
     <button class="secondary" data-command="tests">Infer Tests</button>
     <button class="secondary" data-command="explain">Explain File</button>
+    <button class="secondary" data-command="skills">Skills</button>
+    <button class="secondary" data-command="memory">Memory</button>
     <button class="secondary" data-command="learn">Learning Status</button>
+    <button class="secondary" data-command="doctor">Doctor</button>
   </div>
   <pre id="output">Helix output will appear here.</pre>
   <script nonce="${scriptNonce}">
     const vscode = acquireVsCodeApi();
     const prompt = document.getElementById("prompt");
+    const command = document.getElementById("command");
     const output = document.getElementById("output");
     const status = document.getElementById("status");
+    function run(commandName) {
+      status.textContent = "Running...";
+      output.textContent = "Running Helix...";
+      vscode.postMessage({ command: commandName, prompt: prompt.value });
+    }
     document.querySelectorAll("button[data-command]").forEach(button => {
       button.addEventListener("click", () => {
-        status.textContent = "Running...";
-        output.textContent = "Running Helix...";
-        vscode.postMessage({ command: button.dataset.command, prompt: prompt.value });
+        run(button.dataset.command);
       });
     });
+    document.querySelector("button[data-run-selected]").addEventListener("click", () => run(command.value));
     window.addEventListener("message", event => {
       const message = event.data;
       status.textContent = message.ok ? "Ready" : "Error";
@@ -377,6 +442,8 @@ async function runRightPanelCommand(panel, message) {
   let args;
   if (command === "review") {
     args = ["code", "review"];
+  } else if (command === "agent") {
+    args = ["agent", prompt || "Inspect this workspace and suggest next steps."];
   } else if (command === "map") {
     args = ["code", "map"];
   } else if (command === "tests") {
@@ -386,6 +453,48 @@ async function runRightPanelCommand(panel, message) {
     args = path ? ["code", "explain", path] : ["ask", "Explain the current workspace."];
   } else if (command === "learn") {
     args = ["learn", "status"];
+  } else if (command === "fix") {
+    args = ["code", "fix", prompt || "Plan a safe code improvement."];
+  } else if (command === "context") {
+    args = ["context", "show"];
+  } else if (command === "skills") {
+    args = ["skills", "list"];
+  } else if (command === "skillsSearch") {
+    args = ["skills", "search", prompt || "code"];
+  } else if (command === "tools") {
+    args = ["tools", "list"];
+  } else if (command === "providers") {
+    args = ["providers", "list"];
+  } else if (command === "memory") {
+    args = ["memory", "list"];
+  } else if (command === "memorySearch") {
+    args = ["memory", "search", prompt || ""];
+  } else if (command === "sessions") {
+    args = ["sessions", "list"];
+  } else if (command === "missions") {
+    args = ["mission", "list"];
+  } else if (command === "schedule") {
+    args = ["schedule", "list"];
+  } else if (command === "history") {
+    args = ["history"];
+  } else if (command === "plugins") {
+    args = ["plugins", "list"];
+  } else if (command === "pluginTools") {
+    args = ["plugins", "tools"];
+  } else if (command === "capabilities") {
+    args = ["capabilities"];
+  } else if (command === "doctor") {
+    args = ["doctor"];
+  } else if (command === "finetunePrepare") {
+    args = ["finetune", "prepare", "--min-rating", "4"];
+  } else if (command === "finetuneAutoDryRun") {
+    args = ["finetune", "auto", "--base-model", prompt || "gpt-4.1-mini", "--dry-run"];
+  } else if (command === "chat") {
+    await openChatCommand();
+    panel.webview.postMessage({ ok: true, text: "Opened @helix Chat." });
+    return;
+  } else if (command === "raw") {
+    args = splitArgs(prompt || "capabilities");
   } else {
     args = ["ask", prompt || "Summarize this workspace."];
   }
@@ -395,6 +504,16 @@ async function runRightPanelCommand(panel, message) {
   } catch (error) {
     panel.webview.postMessage({ ok: false, text: error.message });
   }
+}
+
+function splitArgs(text) {
+  const matches = String(text).match(/"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|\S+/g) || [];
+  return matches.map(part => {
+    if ((part.startsWith('"') && part.endsWith('"')) || (part.startsWith("'") && part.endsWith("'"))) {
+      return part.slice(1, -1);
+    }
+    return part;
+  });
 }
 
 function openRightPanelCommand() {

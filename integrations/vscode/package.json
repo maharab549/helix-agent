@@ -2,7 +2,7 @@
   "name": "helix-agent-vscode",
   "displayName": "Helix Agent",
   "description": "Use Helix Agent from VS Code with chat and coding commands.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "helix-agent",
   "license": "MIT",
   "author": {

@@ -239,6 +239,7 @@ It adds:
 - `@helix` chat participant
 - Helix Activity Bar icon and sidebar panel
 - right-side Helix Agent panel beside the editor
+- right-side Command Center for core, code, context, state, plugin, and fine-tuning workflows
 - `@helix /map`, `/review`, `/explain`, `/fix`, `/learn`
 - Copilot agent-mode tool reference: `#helix`
 - `Helix: Ask`
@@ -249,6 +250,8 @@ It adds:
 - `Helix: Learning Status`
 
 For a right-side layout like Codex/Claude-style panels, run `Helix: Open Right Side Panel` from the Command Palette or click `Open Right Side Panel` in the Helix sidebar.
+
+The right-side panel exposes most Helix CLI groups: ask, agent, capabilities, doctor, code map/review/explain/fix/tests, context, skills, tools, providers, memory, learning, sessions, missions, schedule, history, plugins, fine-tune prepare/dry-run, and raw CLI arguments.
 
 Development run:
 
