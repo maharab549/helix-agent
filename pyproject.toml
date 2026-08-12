@@ -1,0 +1,34 @@
+[project]
+name = "helix-agent"
+version = "0.1.0"
+description = "A lightweight standalone CLI AI agent with OpenAI-compatible and Ollama providers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Helix Agent Contributors" }]
+dependencies = []
+keywords = ["ai", "agent", "cli", "ollama", "openai", "openrouter"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development",
+  "Topic :: Utilities",
+]
+
+[project.scripts]
+helix = "helix_agent.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["helix_agent*"]
+
+[tool.setuptools.package-data]
+helix_agent = ["skills/*/SKILL.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

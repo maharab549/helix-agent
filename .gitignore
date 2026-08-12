@@ -1,0 +1,11 @@
+.helix/
+.helix-agent/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+dist/
+build/
+*.egg-info/
