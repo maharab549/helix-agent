@@ -3,9 +3,10 @@ from __future__ import annotations
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from helix_agent.codeops import build_explain_prompt, build_fix_prompt, infer_test_commands
-from helix_agent.config import load_config
+from helix_agent.config import apply_auth_file, auth_status, init_auth_file, load_config, save_auth_key
 from helix_agent.context import collect_context_blocks, format_workspace_context
 from helix_agent.learning import (
     build_dataset,
@@ -43,6 +44,57 @@ class HelixCliTests(unittest.TestCase):
         config = load_config()
         provider = resolve_provider(config, None)
         self.assertEqual(provider.name, config.default_provider)
+
+    def test_toml_config_and_project_override(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            project = root / "project"
+            project.mkdir()
+            with patch.dict("os.environ", {"HELIX_HOME": str(home)}, clear=False):
+                home.mkdir()
+                (home / "config.toml").write_text(
+                    "\n".join([
+                        'default_provider = "openrouter"',
+                        "",
+                        "[providers.openrouter]",
+                        'model = "anthropic/claude-3.5-sonnet"',
+                        'base_url = "https://openrouter.ai/api/v1/chat/completions"',
+                        'api_key_env = "OPENROUTER_API_KEY"',
+                        "",
+                    ]),
+                    encoding="utf-8",
+                )
+                (project / ".helix").mkdir()
+                (project / ".helix" / "config.toml").write_text(
+                    "\n".join([
+                        'default_provider = "ollama"',
+                        "",
+                        "[providers.ollama]",
+                        'model = "qwen2.5-coder"',
+                        "",
+                    ]),
+                    encoding="utf-8",
+                )
+                config = load_config(cwd=project)
+                self.assertEqual(config.default_provider, "ollama")
+                self.assertEqual(config.providers["openrouter"].model, "anthropic/claude-3.5-sonnet")
+                self.assertEqual(config.providers["ollama"].model, "qwen2.5-coder")
+
+    def test_auth_json_applies_provider_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            with patch.dict("os.environ", {"HELIX_HOME": str(home)}, clear=False):
+                config = load_config(include_project=False)
+                auth_path = init_auth_file(config)
+                self.assertTrue(auth_path.exists())
+                save_auth_key(config, "openai", "sk-test")
+                status = auth_status(config)
+                self.assertTrue(status["providers"]["openai"]["auth_json"])
+                with patch.dict("os.environ", {"OPENAI_API_KEY": ""}, clear=False):
+                    applied = apply_auth_file(config, overwrite=True)
+                    self.assertEqual(applied["OPENAI_API_KEY"], "sk-test")
+                    self.assertEqual(resolve_provider(config, None).api_key_env, "OPENAI_API_KEY")
 
     def test_tool_call_parser(self) -> None:
         text = 'before <tool_call>{"tool":"read_file","args":{"path":"README.md"}}</tool_call> after'

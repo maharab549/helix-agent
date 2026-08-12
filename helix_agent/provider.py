@@ -81,7 +81,8 @@ def _complete_openai_compatible(
     if provider.api_key_env and not api_key:
         raise ProviderError(
             f"{provider.name} needs {provider.api_key_env}. "
-            f"Set it or choose `--provider ollama` for a local model."
+            f"Set it, run `helix auth set {provider.name} <api-key>`, "
+            f"or choose `--provider ollama` for a local model."
         )
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     if provider.name == "openrouter":

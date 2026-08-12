@@ -1,5 +1,7 @@
 const vscode = require("vscode");
 const cp = require("child_process");
+const os = require("os");
+const path = require("path");
 
 let rightPanel;
 let extensionContext;
@@ -204,6 +206,9 @@ class HelixPanelProvider {
     return [
       new HelixActionItem("Setup LLM / Login", { command: "helix.setupLlm", title: "Setup LLM / Login" }, "key"),
       new HelixActionItem("Setup Details", { command: "helix.setupDetails", title: "Setup Details" }, "settings-gear"),
+      new HelixActionItem("Open User Config", { command: "helix.openUserConfig", title: "Open User Config" }, "json"),
+      new HelixActionItem("Open Auth File", { command: "helix.openAuthFile", title: "Open Auth File" }, "lock"),
+      new HelixActionItem("Open Project Config", { command: "helix.openProjectConfig", title: "Open Project Config" }, "folder"),
       new HelixActionItem("Open Right Side Panel", { command: "helix.openRightPanel", title: "Open Right Side Panel" }, "layout-sidebar-right"),
       new HelixActionItem("Ask Helix", { command: "helix.ask", title: "Ask Helix" }, "comment-discussion"),
       new HelixActionItem("Open @helix Chat", { command: "helix.openChat", title: "Open @helix Chat" }, "sparkle"),
@@ -370,6 +375,14 @@ function providerSetupByName(name) {
   return PROVIDER_SETUP.find(provider => provider.provider === name);
 }
 
+function localHelixHome() {
+  return process.env.HELIX_HOME || path.join(os.homedir(), ".helix-agent");
+}
+
+function localProjectConfigPath() {
+  return path.join(workspaceCwd(), ".helix", "config.toml");
+}
+
 function displayBaseUrl(cfg, setup) {
   return cfg[setup.baseUrlSetting] || setup.defaultBaseUrl;
 }
@@ -381,6 +394,12 @@ async function showGeneratedDocument(content, language = "markdown") {
 
 async function updateHelixSetting(key, value) {
   await vscode.workspace.getConfiguration("helix").update(key, value, vscode.ConfigurationTarget.Global);
+}
+
+async function openFilePath(path) {
+  const uri = vscode.Uri.file(path);
+  const doc = await vscode.workspace.openTextDocument(uri);
+  await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.Beside });
 }
 
 async function runConfigSet(key, value) {
@@ -468,6 +487,21 @@ async function setupDetailsCommand(options = {}) {
     vscode.window.showInformationMessage("Helix setup details loaded.");
   }
   return text;
+}
+
+async function openUserConfigCommand() {
+  await runHelix(["init"]);
+  await openFilePath(path.join(localHelixHome(), "config.toml"));
+}
+
+async function openAuthFileCommand() {
+  await runHelix(["auth", "init"]);
+  await openFilePath(path.join(localHelixHome(), "auth.json"));
+}
+
+async function openProjectConfigCommand() {
+  await runHelix(["config", "init-project"]);
+  await openFilePath(localProjectConfigPath());
 }
 
 async function setupLlmCommand(options = {}) {
@@ -676,6 +710,9 @@ function rightPanelHtml(webview) {
       <optgroup label="Core">
         <option value="setup">Setup LLM / Login</option>
         <option value="setupDetails">Setup Details</option>
+        <option value="openUserConfig">Open User Config</option>
+        <option value="openAuthFile">Open Auth File</option>
+        <option value="openProjectConfig">Open Project Config</option>
         <option value="ask">Ask</option>
         <option value="agent">Agent Run</option>
         <option value="chat">Open @helix Chat</option>
@@ -719,6 +756,9 @@ function rightPanelHtml(webview) {
   <div class="actions">
     <button data-command="setup">Setup LLM</button>
     <button class="secondary" data-command="setupDetails">Setup Details</button>
+    <button class="secondary" data-command="openUserConfig">User Config</button>
+    <button class="secondary" data-command="openAuthFile">Auth File</button>
+    <button class="secondary" data-command="openProjectConfig">Project Config</button>
     <button data-command="ask">Ask</button>
     <button data-command="agent">Agent Run</button>
     <button data-command="review">Review Workspace</button>
@@ -766,6 +806,30 @@ async function runRightPanelCommand(panel, message) {
     try {
       const text = await setupLlmCommand({ showDocument: false });
       panel.webview.postMessage({ ok: true, text });
+    } catch (error) {
+      panel.webview.postMessage({ ok: false, text: error.message });
+    }
+    return;
+  } else if (command === "openUserConfig") {
+    try {
+      await openUserConfigCommand();
+      panel.webview.postMessage({ ok: true, text: "Opened ~/.helix-agent/config.toml." });
+    } catch (error) {
+      panel.webview.postMessage({ ok: false, text: error.message });
+    }
+    return;
+  } else if (command === "openAuthFile") {
+    try {
+      await openAuthFileCommand();
+      panel.webview.postMessage({ ok: true, text: "Opened ~/.helix-agent/auth.json." });
+    } catch (error) {
+      panel.webview.postMessage({ ok: false, text: error.message });
+    }
+    return;
+  } else if (command === "openProjectConfig") {
+    try {
+      await openProjectConfigCommand();
+      panel.webview.postMessage({ ok: true, text: "Opened .helix/config.toml." });
     } catch (error) {
       panel.webview.postMessage({ ok: false, text: error.message });
     }
@@ -957,6 +1021,9 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("helix.learnStatus", learnStatusCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.setupLlm", setupLlmCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.setupDetails", setupDetailsCommand));
+  context.subscriptions.push(vscode.commands.registerCommand("helix.openUserConfig", openUserConfigCommand));
+  context.subscriptions.push(vscode.commands.registerCommand("helix.openAuthFile", openAuthFileCommand));
+  context.subscriptions.push(vscode.commands.registerCommand("helix.openProjectConfig", openProjectConfigCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.openChat", openChatCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.openRightPanel", openRightPanelCommand));
   registerChat(context);

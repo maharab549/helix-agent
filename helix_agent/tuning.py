@@ -76,7 +76,10 @@ def api_base_from_provider(provider: ProviderConfig) -> str:
 def _api_key(provider: ProviderConfig) -> str:
     api_key = os.environ.get(provider.api_key_env) if provider.api_key_env else ""
     if not api_key:
-        raise ProviderError(f"{provider.name} needs {provider.api_key_env} for fine-tuning.")
+        raise ProviderError(
+            f"{provider.name} needs {provider.api_key_env} for fine-tuning. "
+            f"Set it or run `helix auth set {provider.name} <api-key>`."
+        )
     return api_key
 
 

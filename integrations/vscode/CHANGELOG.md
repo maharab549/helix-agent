@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4
+
+- Add Codex-style editable Helix setup files: `~/.helix-agent/config.toml`, `~/.helix-agent/auth.json`, and `.helix/config.toml`.
+- Add VS Code commands to open the user config, auth file, and project config directly.
+- Teach the CLI to load auth keys from `auth.json` and project overrides from `.helix/config.toml`.
+
 ## 0.1.3
 
 - Add `Helix: Setup LLM / Login` for OpenAI, OpenRouter, Ollama, and custom OpenAI-compatible endpoints.

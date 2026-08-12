@@ -19,6 +19,9 @@ This extension connects VS Code to the local `helix` CLI.
 - `Helix: Learning Status`
 - `Helix: Setup LLM / Login`
 - `Helix: Setup Details`
+- `Helix: Open User Config`
+- `Helix: Open Auth File`
+- `Helix: Open Project Config`
 
 After installing the VSIX, look for the Helix icon in the left Activity Bar. Open the Helix sidebar to run quick actions beside other coding agents.
 
@@ -42,6 +45,21 @@ Then open this extension folder in VS Code and press `F5` to run an Extension De
 Run `Helix: Setup LLM / Login` from the Command Palette or click `Setup LLM / Login` in the Helix sidebar.
 
 The wizard lets you choose OpenAI, OpenRouter, Ollama, or a custom OpenAI-compatible endpoint; enter a model ID; enter a base URL; and paste the API key if the provider needs one. API keys are stored in VS Code Secret Storage and injected into the local `helix` process as `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `HELIX_API_KEY`; they are not written to the workspace.
+
+For file-based setup, use:
+
+- `Helix: Open User Config` for `~/.helix-agent/config.toml`
+- `Helix: Open Auth File` for `~/.helix-agent/auth.json`
+- `Helix: Open Project Config` for `.helix/config.toml`
+
+The CLI also supports:
+
+```powershell
+helix init --project
+helix auth init
+helix auth set openai "sk-your-key"
+helix config paths
+```
 
 Run `Helix: Setup Details` to inspect the active provider, model, base URL, key status, `helix providers list`, and `helix doctor` output without revealing secrets.
 

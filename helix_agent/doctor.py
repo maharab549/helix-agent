@@ -7,6 +7,7 @@ import urllib.request
 from typing import Any
 
 from .config import AgentConfig
+from .config import auth_environment
 
 
 def _version(command: str) -> str | None:
@@ -34,20 +35,25 @@ def _ollama_available(base_url: str) -> bool:
 
 def collect_diagnostics(config: AgentConfig) -> dict[str, Any]:
     providers: dict[str, Any] = {}
+    auth_env = auth_environment(config)
     for name, provider in sorted(config.providers.items()):
-        has_key = bool(os.environ.get(provider.api_key_env)) if provider.api_key_env else True
+        has_key = bool(os.environ.get(provider.api_key_env) or auth_env.get(provider.api_key_env)) if provider.api_key_env else True
         providers[name] = {
             "kind": provider.kind,
             "model": provider.model,
             "base_url": provider.base_url,
             "api_key_env": provider.api_key_env,
             "api_key_available": has_key,
+            "api_key_in_auth_file": bool(auth_env.get(provider.api_key_env)) if provider.api_key_env else False,
             "local_server_available": _ollama_available(provider.base_url) if provider.kind == "ollama" else None,
         }
 
     return {
         "home": str(config.home),
         "project_dir": str(config.project_dir),
+        "config_file": str(config.config_file),
+        "auth_file": str(config.auth_file),
+        "project_config_file": str(config.project_config_file),
         "default_provider": config.default_provider,
         "tools": {
             "python": _version("python"),

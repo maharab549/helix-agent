@@ -34,6 +34,54 @@ python -m pip install -e .
 helix doctor
 ```
 
+Helix uses editable setup files similar to modern coding agents:
+
+- User config: `~/.helix-agent/config.toml`
+- User auth: `~/.helix-agent/auth.json`
+- Project override: `.helix/config.toml`
+- Legacy config import: `~/.helix-agent/config.json`
+
+Create them with:
+
+```powershell
+helix init --project
+helix auth init
+helix config paths
+```
+
+Example `~/.helix-agent/config.toml`:
+
+```toml
+default_provider = "openai"
+
+[providers.openai]
+kind = "openai-compatible"
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1/chat/completions"
+api_key_env = "OPENAI_API_KEY"
+```
+
+Example `~/.helix-agent/auth.json`:
+
+```json
+{
+  "version": 1,
+  "providers": {
+    "openai": {
+      "api_key": "sk-your-key"
+    }
+  },
+  "env": {}
+}
+```
+
+You can also store a key without editing JSON:
+
+```powershell
+helix auth set openai "sk-your-key"
+helix auth status
+```
+
 You can also run it directly from the folder:
 
 ```powershell
@@ -251,8 +299,13 @@ It adds:
 - `Helix: Learning Status`
 - `Helix: Setup LLM / Login`
 - `Helix: Setup Details`
+- `Helix: Open User Config`
+- `Helix: Open Auth File`
+- `Helix: Open Project Config`
 
 After installing the VSIX, run `Helix: Setup LLM / Login` from the Command Palette or click it in the Helix sidebar. The wizard chooses a provider, model, base URL, and API key. API keys are stored in VS Code Secret Storage and injected into the local `helix` process as `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `HELIX_API_KEY`; they are not written to the workspace. For local Ollama, choose Ollama and set the chat URL/model.
+
+If you prefer file-based setup, use `Helix: Open User Config`, `Helix: Open Auth File`, and `Helix: Open Project Config` from the Command Palette or Helix sidebar.
 
 Run `Helix: Setup Details` any time to inspect the active provider, model, base URL, key status, provider list, and `helix doctor` output without exposing secrets.
 

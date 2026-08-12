@@ -2,7 +2,7 @@
   "name": "helix-agent-vscode",
   "displayName": "Helix Agent",
   "description": "Use Helix Agent from VS Code with chat and coding commands.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "helix-agent",
   "license": "MIT",
   "author": {
@@ -63,6 +63,9 @@
     "onCommand:helix.learnStatus",
     "onCommand:helix.setupLlm",
     "onCommand:helix.setupDetails",
+    "onCommand:helix.openUserConfig",
+    "onCommand:helix.openAuthFile",
+    "onCommand:helix.openProjectConfig",
     "onCommand:helix.openChat",
     "onCommand:helix.openRightPanel",
     "onView:helix.panel",
@@ -144,6 +147,18 @@
         "title": "Helix: Setup Details"
       },
       {
+        "command": "helix.openUserConfig",
+        "title": "Helix: Open User Config"
+      },
+      {
+        "command": "helix.openAuthFile",
+        "title": "Helix: Open Auth File"
+      },
+      {
+        "command": "helix.openProjectConfig",
+        "title": "Helix: Open Project Config"
+      },
+      {
         "command": "helix.openChat",
         "title": "Helix: Open Chat"
       },
@@ -173,7 +188,7 @@
     "viewsWelcome": [
       {
         "view": "helix.panel",
-        "contents": "Run Helix from VS Code.\n[Setup LLM / Login](command:helix.setupLlm)\n[Setup Details](command:helix.setupDetails)\n[Open Right Side Panel](command:helix.openRightPanel)\n[Ask Helix](command:helix.ask)\n[Review Workspace](command:helix.reviewWorkspace)\n[Open Chat](command:helix.openChat)"
+        "contents": "Run Helix from VS Code.\n[Setup LLM / Login](command:helix.setupLlm)\n[Setup Details](command:helix.setupDetails)\n[Open User Config](command:helix.openUserConfig)\n[Open Auth File](command:helix.openAuthFile)\n[Open Project Config](command:helix.openProjectConfig)\n[Open Right Side Panel](command:helix.openRightPanel)\n[Ask Helix](command:helix.ask)\n[Review Workspace](command:helix.reviewWorkspace)\n[Open Chat](command:helix.openChat)"
       }
     ],
     "menus": {
@@ -194,14 +209,29 @@
           "group": "navigation@2"
         },
         {
-          "command": "helix.ask",
+          "command": "helix.openUserConfig",
           "when": "view == helix.panel",
           "group": "navigation@3"
         },
         {
-          "command": "helix.reviewWorkspace",
+          "command": "helix.openAuthFile",
           "when": "view == helix.panel",
           "group": "navigation@4"
+        },
+        {
+          "command": "helix.openProjectConfig",
+          "when": "view == helix.panel",
+          "group": "navigation@5"
+        },
+        {
+          "command": "helix.ask",
+          "when": "view == helix.panel",
+          "group": "navigation@6"
+        },
+        {
+          "command": "helix.reviewWorkspace",
+          "when": "view == helix.panel",
+          "group": "navigation@7"
         }
       ],
       "editor/context": [

@@ -12,7 +12,18 @@ from .agent_runtime import build_messages as build_agent_messages
 from .agent_runtime import run_agent_loop
 from .capabilities import capability_report
 from .codeops import build_explain_prompt, build_fix_prompt, build_review_prompt, codebase_context, infer_test_commands
-from .config import init_config, load_config, save_config, set_config_value
+from .config import (
+    apply_auth_file,
+    auth_status,
+    init_auth_file,
+    init_config,
+    init_project_config,
+    load_config,
+    save_auth_key,
+    save_config,
+    setup_paths,
+    set_config_value,
+)
 from .context import collect_context_blocks, format_workspace_context
 from .doctor import collect_diagnostics
 from .history import list_history, save_exchange
@@ -45,6 +56,7 @@ from .workspace import save_workspace_index, scan_workspace
 
 COMMANDS = {
     "agent",
+    "auth",
     "ask",
     "capabilities",
     "chat",
@@ -132,9 +144,19 @@ def build_parser() -> argparse.ArgumentParser:
     config = sub.add_parser("config", help="Show or update config")
     config_sub = config.add_subparsers(dest="config_command")
     config_sub.add_parser("show")
+    config_sub.add_parser("paths")
+    config_sub.add_parser("init-project")
     config_set = config_sub.add_parser("set")
     config_set.add_argument("key")
     config_set.add_argument("value")
+
+    auth = sub.add_parser("auth", help="Manage ~/.helix-agent/auth.json")
+    auth_sub = auth.add_subparsers(dest="auth_command")
+    auth_sub.add_parser("status")
+    auth_sub.add_parser("init")
+    auth_set = auth_sub.add_parser("set")
+    auth_set.add_argument("provider")
+    auth_set.add_argument("api_key")
 
     providers = sub.add_parser("providers", help="List providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
@@ -320,6 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = sub.add_parser("init", help="Create user config and project folders")
     init.add_argument("--force", action="store_true")
+    init.add_argument("--project", action="store_true", help="Also create .helix/config.toml")
 
     completion = sub.add_parser("completion")
     completion.add_argument("shell", choices=["bash", "zsh", "powershell"])
@@ -1043,6 +1066,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"helix-agent {__version__}")
         return 0
     config = load_config()
+    apply_auth_file(config)
 
     try:
         if ns.command == "ask":
@@ -1063,11 +1087,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "default_provider": config.default_provider,
                     "system_prompt": config.system_prompt,
                     "providers": {name: provider.__dict__ for name, provider in config.providers.items()},
+                    "files": setup_paths(config),
                 }, indent=2))
+                return 0
+            if ns.config_command == "paths":
+                print_json(setup_paths(config))
+                return 0
+            if ns.config_command == "init-project":
+                print(init_project_config(cwd=Path.cwd(), force=False))
                 return 0
             if ns.config_command == "set":
                 set_config_value(config, ns.key, ns.value)
                 print(save_config(config))
+                return 0
+        if ns.command == "auth":
+            if ns.auth_command in {None, "status"}:
+                print_json(auth_status(config))
+                return 0
+            if ns.auth_command == "init":
+                print(init_auth_file(config))
+                return 0
+            if ns.auth_command == "set":
+                print(save_auth_key(config, ns.provider, ns.api_key))
                 return 0
         if ns.command == "providers":
             print_provider_table(config)
@@ -1101,6 +1142,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if ns.command == "doctor":
             if ns.fix:
                 init_config()
+                init_auth_file(config)
                 config.project_dir.mkdir(parents=True, exist_ok=True)
             data = collect_diagnostics(config)
             if getattr(ns, "json", False):
@@ -1113,7 +1155,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if ns.command == "init":
             print(init_config(force=ns.force))
+            print(init_auth_file(config, force=ns.force))
             config.project_dir.mkdir(parents=True, exist_ok=True)
+            if ns.project:
+                print(init_project_config(cwd=Path.cwd(), force=ns.force))
             return 0
         if ns.command == "completion":
             print(completion_script(ns.shell))
