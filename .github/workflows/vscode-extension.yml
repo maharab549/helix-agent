@@ -1,0 +1,61 @@
+name: VS Code Extension
+
+on:
+  push:
+    paths:
+      - "integrations/vscode/**"
+      - ".github/workflows/vscode-extension.yml"
+  pull_request:
+    paths:
+      - "integrations/vscode/**"
+      - ".github/workflows/vscode-extension.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish to Visual Studio Marketplace"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: integrations/vscode/package-lock.json
+      - run: npm install
+      - run: npm run check
+      - run: npx vsce package --no-dependencies
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helix-agent-vscode-vsix
+          path: integrations/vscode/*.vsix
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == 'true'
+    needs: package
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: integrations/vscode/package-lock.json
+      - run: npm install
+      - run: npx vsce publish --no-dependencies -p "$VSCE_PAT"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}

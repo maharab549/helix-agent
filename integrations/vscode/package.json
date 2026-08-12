@@ -5,6 +5,27 @@
   "version": "0.1.0",
   "publisher": "helix-agent",
   "license": "MIT",
+  "author": {
+    "name": "Helix Agent Contributors"
+  },
+  "homepage": "https://github.com/maharab549/helix-agent",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maharab549/helix-agent.git",
+    "directory": "integrations/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/maharab549/helix-agent/issues"
+  },
+  "keywords": [
+    "helix",
+    "agent",
+    "ai",
+    "chat",
+    "coding agent",
+    "copilot",
+    "cli"
+  ],
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -13,6 +34,25 @@
     "Programming Languages",
     "Other"
   ],
+  "galleryBanner": {
+    "color": "#111827",
+    "theme": "dark"
+  },
+  "badges": [
+    {
+      "url": "https://github.com/maharab549/helix-agent/actions/workflows/ci.yml/badge.svg",
+      "href": "https://github.com/maharab549/helix-agent/actions/workflows/ci.yml",
+      "description": "CI"
+    }
+  ],
+  "scripts": {
+    "check": "node --check extension.js",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.2"
+  },
   "activationEvents": [
     "onChatParticipant:helix.agent",
     "onCommand:helix.ask",

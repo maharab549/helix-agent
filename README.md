@@ -255,6 +255,19 @@ code .
 
 Then press `F5` in VS Code to launch an Extension Development Host. The extension calls your local `helix` executable, so run `python -m pip install -e .` from the repo root first.
 
+To publish it so it appears in VS Code extension search, create a Visual Studio Marketplace publisher, set the exact publisher ID in `integrations/vscode/package.json`, add a GitHub Actions secret named `VSCE_PAT`, then run the `VS Code Extension` workflow with `publish=true`.
+
+Local package test:
+
+```powershell
+cd integrations/vscode
+npm install
+npm run check
+npx vsce package --no-dependencies
+```
+
+Full release notes are in `docs/vscode-marketplace.md`.
+
 ## Feature Map
 
 Already available:
