@@ -28,7 +28,7 @@ helix = "helix_agent.cli:main"
 include = ["helix_agent*"]
 
 [tool.setuptools.package-data]
-helix_agent = ["skills/*/SKILL.md"]
+helix_agent = ["skills/*/SKILL.md", "skills/*/references/*", "skills/*/scripts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

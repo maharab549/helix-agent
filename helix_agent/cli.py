@@ -3,20 +3,43 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 from typing import Sequence
 
 from . import __version__
+from .agent_runtime import run_agent_loop
 from .config import init_config, load_config, save_config, set_config_value
 from .doctor import collect_diagnostics
 from .history import list_history, save_exchange
+from .memory import iter_memories, remember, search_memories
 from .missions import build_mission_prompt, create_mission, list_missions, load_mission, save_mission
 from .output import Palette, format_table, print_json
 from .provider import ProviderError, complete
+from .scheduler import add_job, load_jobs, remove_job, run_due_jobs
+from .sessions import create_session, export_markdown, list_sessions, load_session
 from .skills import create_project_skill, find_skill, load_skill_index, read_skill, save_index, search_skills
+from .subagents import run_subagents
+from .tools_runtime import TOOL_DESCRIPTIONS, execute_tool
 
 
-COMMANDS = {"ask", "chat", "config", "doctor", "history", "init", "mission", "providers", "skills", "completion", "version"}
+COMMANDS = {
+    "agent",
+    "ask",
+    "chat",
+    "completion",
+    "config",
+    "doctor",
+    "history",
+    "init",
+    "memory",
+    "mission",
+    "providers",
+    "schedule",
+    "sessions",
+    "skills",
+    "subagents",
+    "tools",
+    "version",
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +57,17 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--timeout", type=int, default=120)
     ask.add_argument("--no-save", action="store_true")
     ask.add_argument("prompt", nargs=argparse.REMAINDER)
+
+    agent = sub.add_parser("agent", help="Run an autonomous local-tool loop")
+    add_model_options(agent)
+    agent.add_argument("--system", default=None)
+    agent.add_argument("--skill", action="append", default=[])
+    agent.add_argument("--temperature", type=float, default=0.2)
+    agent.add_argument("--timeout", type=int, default=120)
+    agent.add_argument("--max-steps", type=int, default=6)
+    agent.add_argument("--yes", action="store_true", help="Allow file writes and shell/python execution")
+    agent.add_argument("--no-save", action="store_true")
+    agent.add_argument("prompt", nargs=argparse.REMAINDER)
 
     chat = sub.add_parser("chat", help="Start an interactive chat")
     add_model_options(chat)
@@ -89,6 +123,55 @@ def build_parser() -> argparse.ArgumentParser:
 
     history = sub.add_parser("history", help="List saved exchanges")
     history.add_argument("--limit", type=int, default=20)
+
+    sessions = sub.add_parser("sessions", help="Manage persistent chat sessions")
+    sessions_sub = sessions.add_subparsers(dest="sessions_command")
+    sessions_sub.add_parser("list")
+    sessions_new = sessions_sub.add_parser("new")
+    sessions_new.add_argument("name", nargs="?", default="session")
+    sessions_show = sessions_sub.add_parser("show")
+    sessions_show.add_argument("selector")
+    sessions_export = sessions_sub.add_parser("export")
+    sessions_export.add_argument("selector")
+    sessions_export.add_argument("output", nargs="?")
+
+    memory = sub.add_parser("memory", help="Remember and recall useful facts")
+    memory_sub = memory.add_subparsers(dest="memory_command")
+    memory_add = memory_sub.add_parser("add")
+    memory_add.add_argument("--global", dest="global_scope", action="store_true")
+    memory_add.add_argument("--tag", action="append", default=[])
+    memory_add.add_argument("text", nargs=argparse.REMAINDER)
+    memory_search = memory_sub.add_parser("search")
+    memory_search.add_argument("--limit", type=int, default=10)
+    memory_search.add_argument("query", nargs=argparse.REMAINDER)
+    memory_sub.add_parser("list")
+
+    tools = sub.add_parser("tools", help="Inspect and run local tools")
+    tools_sub = tools.add_subparsers(dest="tools_command")
+    tools_sub.add_parser("list")
+    tools_run = tools_sub.add_parser("run")
+    tools_run.add_argument("--yes", action="store_true", help="Allow write/shell/python tools")
+    tools_run.add_argument("tool")
+    tools_run.add_argument("args_json", nargs="?")
+
+    subagents = sub.add_parser("subagents", help="Run parallel focused subagents")
+    add_model_options(subagents)
+    subagents.add_argument("--task", action="append", default=[], help="name=prompt; repeatable")
+    subagents.add_argument("--timeout", type=int, default=120)
+    subagents.add_argument("prompt", nargs=argparse.REMAINDER)
+
+    schedule = sub.add_parser("schedule", help="Manage recurring prompts")
+    schedule_sub = schedule.add_subparsers(dest="schedule_command")
+    schedule_sub.add_parser("list")
+    schedule_add = schedule_sub.add_parser("add")
+    add_model_options(schedule_add)
+    schedule_add.add_argument("--every", type=int, required=True, help="Interval in seconds")
+    schedule_add.add_argument("prompt", nargs=argparse.REMAINDER)
+    schedule_run = schedule_sub.add_parser("run")
+    schedule_run.add_argument("--force", action="store_true")
+    schedule_run.add_argument("--timeout", type=int, default=120)
+    schedule_remove = schedule_sub.add_parser("remove")
+    schedule_remove.add_argument("selector")
 
     doctor = sub.add_parser("doctor", help="Check local readiness")
     doctor.add_argument("--json", action="store_true")
@@ -164,6 +247,38 @@ def run_ask(config, ns, palette: Palette) -> int:
     return 0
 
 
+def run_agent(config, ns, palette: Palette) -> int:
+    prompt = prompt_from_parts(ns.prompt)
+    if not prompt:
+        print("Usage: helix agent <prompt>", file=sys.stderr)
+        return 2
+    try:
+        result = run_agent_loop(
+            config,
+            prompt,
+            provider_name=ns.provider,
+            model=ns.model,
+            system=ns.system,
+            skill_queries=ns.skill,
+            temperature=ns.temperature,
+            timeout=ns.timeout,
+            max_steps=ns.max_steps,
+            allow_write=ns.yes,
+            allow_shell=ns.yes,
+            save=not ns.no_save,
+        )
+    except ProviderError as exc:
+        print(palette.red(str(exc)), file=sys.stderr)
+        return 1
+    if result.tool_steps:
+        print(palette.dim(f"Tool steps: {len(result.tool_steps)}"))
+        for step in result.tool_steps:
+            print(palette.dim(f"- {step['tool']}: {'ok' if step['ok'] == 'True' else 'error'}"))
+    print(result.content)
+    print(palette.dim(f"Session: {result.session.id}"))
+    return 0
+
+
 def run_chat(config, ns, palette: Palette) -> int:
     messages = [{"role": "system", "content": ns.system or config.system_prompt}]
     provider = ns.provider
@@ -201,7 +316,7 @@ def handle_chat_command(command: str, messages: list[dict[str, str]], config, pa
     verb = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
     if verb == "/help":
-        print("/help, /exit, /clear, /skills [query], /use <query>, /providers")
+        print("/help, /exit, /clear, /skills [query], /use <query>, /providers, /remember <text>, /recall [query], /tools")
         return True
     if verb == "/clear":
         del messages[1:]
@@ -209,6 +324,23 @@ def handle_chat_command(command: str, messages: list[dict[str, str]], config, pa
         return True
     if verb == "/providers":
         print_provider_table(config)
+        return True
+    if verb == "/tools":
+        print(format_table(
+            [{"name": name, "description": description} for name, description in TOOL_DESCRIPTIONS.items()],
+            [("name", "Tool"), ("description", "Description")],
+        ))
+        return True
+    if verb == "/remember" and arg:
+        remember(arg)
+        print("Remembered.")
+        return True
+    if verb == "/recall":
+        entries = search_memories(arg, limit=8) if arg else iter_memories()[:8]
+        print(format_table(
+            [{"scope": entry.scope, "text": entry.text, "tags": ", ".join(entry.tags)} for entry in entries],
+            [("scope", "Scope"), ("tags", "Tags"), ("text", "Text")],
+        ))
         return True
     if verb == "/skills":
         entries = search_skills(load_skill_index(), arg, limit=8) if arg else load_skill_index()[:8]
@@ -325,6 +457,135 @@ def run_mission(config, ns, palette: Palette) -> int:
     return 2
 
 
+def run_sessions(ns) -> int:
+    if ns.sessions_command in {None, "list"}:
+        rows = [
+            {
+                "id": session.id,
+                "name": session.name,
+                "updated": session.updated_at,
+                "messages": len(session.messages),
+            }
+            for session in list_sessions()
+        ]
+        print(format_table(rows, [("id", "ID"), ("name", "Name"), ("messages", "Messages"), ("updated", "Updated")]))
+        return 0
+    if ns.sessions_command == "new":
+        session = create_session(ns.name)
+        print_json(session.to_json())
+        return 0
+    if ns.sessions_command == "show":
+        print_json(load_session(ns.selector).to_json())
+        return 0
+    if ns.sessions_command == "export":
+        session = load_session(ns.selector)
+        markdown = export_markdown(session)
+        if ns.output:
+            output = ns.output
+            with open(output, "w", encoding="utf-8") as handle:
+                handle.write(markdown)
+            print(output)
+        else:
+            print(markdown)
+        return 0
+    return 2
+
+
+def run_memory(ns) -> int:
+    if ns.memory_command in {None, "list"}:
+        entries = iter_memories()
+    elif ns.memory_command == "add":
+        text = prompt_from_parts(ns.text)
+        if not text:
+            print("Memory text is required.", file=sys.stderr)
+            return 2
+        scope = "global" if ns.global_scope else "project"
+        print(remember(text, scope=scope, tags=ns.tag))
+        return 0
+    elif ns.memory_command == "search":
+        entries = search_memories(prompt_from_parts(ns.query), limit=ns.limit)
+    else:
+        return 2
+    print(format_table(
+        [{"scope": entry.scope, "tags": ", ".join(entry.tags), "text": entry.text} for entry in entries],
+        [("scope", "Scope"), ("tags", "Tags"), ("text", "Text")],
+    ))
+    return 0
+
+
+def run_tools(ns) -> int:
+    if ns.tools_command in {None, "list"}:
+        print(format_table(
+            [{"name": name, "description": description} for name, description in TOOL_DESCRIPTIONS.items()],
+            [("name", "Tool"), ("description", "Description")],
+        ))
+        return 0
+    if ns.tools_command == "run":
+        args = json.loads(ns.args_json) if ns.args_json else {}
+        if not isinstance(args, dict):
+            print("Tool args must be a JSON object.", file=sys.stderr)
+            return 2
+        result = execute_tool(ns.tool, args, allow_write=ns.yes, allow_shell=ns.yes)
+        print(result.output)
+        return 0 if result.ok else 1
+    return 2
+
+
+def run_subagents_cmd(config, ns) -> int:
+    tasks: list[tuple[str, str]] = []
+    for raw in ns.task:
+        if "=" in raw:
+            name, prompt = raw.split("=", 1)
+        else:
+            name, prompt = f"task-{len(tasks) + 1}", raw
+        tasks.append((name.strip(), prompt.strip()))
+    base_prompt = prompt_from_parts(ns.prompt)
+    if base_prompt:
+        tasks.append((f"task-{len(tasks) + 1}", base_prompt))
+    if not tasks:
+        print("Provide --task name=prompt or a prompt.", file=sys.stderr)
+        return 2
+    results = run_subagents(config, tasks, provider_name=ns.provider, model=ns.model, timeout=ns.timeout)
+    for result in results:
+        status = "ok" if result.ok else "error"
+        print(f"## {result.name} ({status})\n{result.content}\n")
+    return 0 if all(result.ok for result in results) else 1
+
+
+def run_schedule_cmd(config, ns) -> int:
+    if ns.schedule_command in {None, "list"}:
+        rows = [
+            {
+                "id": job.id,
+                "every": job.every_seconds,
+                "enabled": job.enabled,
+                "prompt": job.prompt,
+                "last": job.last_result[:80],
+            }
+            for job in load_jobs()
+        ]
+        print(format_table(rows, [("id", "ID"), ("every", "Every(s)"), ("enabled", "On"), ("prompt", "Prompt"), ("last", "Last")]))
+        return 0
+    if ns.schedule_command == "add":
+        prompt = prompt_from_parts(ns.prompt)
+        if not prompt:
+            print("Prompt is required.", file=sys.stderr)
+            return 2
+        job = add_job(prompt, every_seconds=ns.every, provider=ns.provider, model=ns.model)
+        print_json(job.to_json())
+        return 0
+    if ns.schedule_command == "run":
+        jobs = run_due_jobs(config, force=ns.force, timeout=ns.timeout)
+        print(format_table(
+            [{"id": job.id, "next": int(job.next_run), "last": job.last_result[:120]} for job in jobs],
+            [("id", "ID"), ("next", "Next"), ("last", "Last")],
+        ))
+        return 0
+    if ns.schedule_command == "remove":
+        return 0 if remove_job(ns.selector) else 1
+    return 2
+
+
 def completion_script(shell: str) -> str:
     words = " ".join(sorted(COMMANDS))
     if shell == "bash":
@@ -351,6 +612,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if ns.command == "ask":
             return run_ask(config, ns, palette)
+        if ns.command == "agent":
+            return run_agent(config, ns, palette)
         if ns.command == "chat":
             return run_chat(config, ns, palette)
         if ns.command == "config":
@@ -374,6 +637,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_skills(ns)
         if ns.command == "mission":
             return run_mission(config, ns, palette)
+        if ns.command == "sessions":
+            return run_sessions(ns)
+        if ns.command == "memory":
+            return run_memory(ns)
+        if ns.command == "tools":
+            return run_tools(ns)
+        if ns.command == "subagents":
+            return run_subagents_cmd(config, ns)
+        if ns.command == "schedule":
+            return run_schedule_cmd(config, ns)
         if ns.command == "history":
             rows = [{"file": str(path)} for path in list_history(limit=ns.limit)]
             print(format_table(rows, [("file", "File")]))
