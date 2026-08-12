@@ -14,6 +14,7 @@ from typing import Any
 
 from .memory import remember, search_memories
 from .plugins import PluginError, execute_plugin_tool, format_plugin_tools_prompt
+from .workspace import scan_workspace, workspace_map_markdown
 
 
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
@@ -39,6 +40,7 @@ TOOL_DESCRIPTIONS = {
     "git_status": "Show concise Git status for the workspace. args: {}",
     "git_diff": "Show Git diff. args: {path?: string, cached?: boolean, max_chars?: number}",
     "http_get": "Fetch text from an HTTP(S) URL. args: {url: string, max_chars?: number}",
+    "workspace_map": "Summarize repository files, languages, tests, and entrypoints. args: {max_files?: number}",
     "shell": "Run a shell command. Requires --yes. args: {command: string, timeout?: number}",
     "python": "Run a short Python snippet. Requires --yes. args: {code: string, timeout?: number}",
     "plugin": "Run an installed Helix plugin tool. Requires --yes. args: {name: string, args?: object}",
@@ -190,6 +192,10 @@ def execute_tool(
             text = body.decode("utf-8", errors="replace")
             suffix = "\n[truncated]" if len(text) > max_chars else ""
             return ToolResult(name, True, f"Content-Type: {content_type}\n\n{text[:max_chars]}{suffix}")
+
+        if name == "workspace_map":
+            max_files = int(args.get("max_files") or 120)
+            return ToolResult(name, True, workspace_map_markdown(scan_workspace(cwd=root), max_files=max_files))
 
         if name == "shell":
             if not allow_shell:

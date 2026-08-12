@@ -1,0 +1,162 @@
+{
+  "name": "helix-agent-vscode",
+  "displayName": "Helix Agent",
+  "description": "Use Helix Agent from VS Code with chat and coding commands.",
+  "version": "0.1.0",
+  "publisher": "helix-agent",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onChatParticipant:helix.agent",
+    "onCommand:helix.ask",
+    "onCommand:helix.fixSelection",
+    "onCommand:helix.rewriteSelection",
+    "onCommand:helix.reviewWorkspace",
+    "onCommand:helix.explainFile",
+    "onCommand:helix.learnStatus",
+    "onLanguageModelTool:helix_workspace"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Helix Agent",
+      "properties": {
+        "helix.executable": {
+          "type": "string",
+          "default": "helix",
+          "description": "Path to the Helix executable."
+        },
+        "helix.provider": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Helix provider override."
+        },
+        "helix.model": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Helix model override."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "helix.ask",
+        "title": "Helix: Ask"
+      },
+      {
+        "command": "helix.fixSelection",
+        "title": "Helix: Fix Selection"
+      },
+      {
+        "command": "helix.rewriteSelection",
+        "title": "Helix: Rewrite Selection"
+      },
+      {
+        "command": "helix.reviewWorkspace",
+        "title": "Helix: Review Workspace"
+      },
+      {
+        "command": "helix.explainFile",
+        "title": "Helix: Explain Current File"
+      },
+      {
+        "command": "helix.learnStatus",
+        "title": "Helix: Learning Status"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "helix.fixSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@10"
+        },
+        {
+          "command": "helix.rewriteSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@11"
+        },
+        {
+          "command": "helix.explainFile",
+          "group": "navigation@12"
+        }
+      ]
+    },
+    "languageModelTools": [
+      {
+        "name": "helix_workspace",
+        "displayName": "Helix Workspace",
+        "toolReferenceName": "helix",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(sparkle)",
+        "userDescription": "Ask Helix Agent for workspace-aware coding help.",
+        "modelDescription": "Runs the local Helix Agent CLI to answer questions about the current workspace, summarize the codebase, or infer test commands. Use when the user asks for Helix-specific context, repository maps, or coding-agent analysis.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "string",
+              "description": "The workspace question or instruction to send to Helix."
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["ask", "map", "tests"],
+              "default": "ask",
+              "description": "Use map for a workspace summary, tests for inferred verification commands, or ask for a natural-language answer."
+            }
+          },
+          "required": ["request"]
+        }
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "helix.agent",
+        "name": "helix",
+        "fullName": "Helix Agent",
+        "description": "Ask Helix about your workspace.",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "map",
+            "description": "Map the current workspace"
+          },
+          {
+            "name": "review",
+            "description": "Review the current workspace"
+          },
+          {
+            "name": "explain",
+            "description": "Explain the active file"
+          },
+          {
+            "name": "fix",
+            "description": "Plan a code fix"
+          },
+          {
+            "name": "learn",
+            "description": "Show Helix learning status"
+          }
+        ],
+        "disambiguation": [
+          {
+            "category": "workspace_coding",
+            "description": "Questions about using Helix Agent to inspect, review, explain, improve, or learn from the current code workspace.",
+            "examples": [
+              "Ask Helix to review this workspace",
+              "Use Helix to explain the active file",
+              "What has Helix learned about this project?"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -4,6 +4,7 @@ import unittest
 import tempfile
 from pathlib import Path
 
+from helix_agent.codeops import build_explain_prompt, build_fix_prompt, infer_test_commands
 from helix_agent.config import load_config
 from helix_agent.context import collect_context_blocks, format_workspace_context
 from helix_agent.learning import (
@@ -23,6 +24,7 @@ from helix_agent.sessions import append_message, create_session, export_markdown
 from helix_agent.skills import load_skill_index, search_skills
 from helix_agent.tuning import auto_fine_tune, fine_tune_payload
 from helix_agent.tools_runtime import execute_tool, parse_tool_calls, strip_tool_calls
+from helix_agent.workspace import save_workspace_index, scan_workspace, workspace_map_markdown
 
 
 class HelixCliTests(unittest.TestCase):
@@ -183,6 +185,34 @@ class HelixCliTests(unittest.TestCase):
             dataset = handle_rpc_request(config, {"id": 4, "method": "learn.dataset", "params": {"min_rating": 5}}, cwd=root)
             self.assertTrue(dataset["ok"])
             self.assertEqual(dataset["result"]["examples"], 1)
+
+    def test_workspace_scan_and_code_prompts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
+            tests = root / "tests"
+            tests.mkdir()
+            (tests / "test_demo.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+            (root / "app.py").write_text("print('hi')\n", encoding="utf-8")
+            index = scan_workspace(cwd=root)
+            self.assertIn("Python", index.languages)
+            self.assertIn("app.py", index.entrypoints)
+            self.assertIn("python -m unittest discover -s tests -v", infer_test_commands(index))
+            self.assertIn("Workspace Map", workspace_map_markdown(index))
+            saved = save_workspace_index(index, cwd=root)
+            self.assertTrue(saved.exists())
+            explain = build_explain_prompt("app.py", cwd=root)
+            self.assertIn("print('hi')", explain)
+            fix = build_fix_prompt("make app importable", cwd=root)
+            self.assertIn("make app importable", fix)
+
+    def test_workspace_map_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text("# Demo\n", encoding="utf-8")
+            result = execute_tool("workspace_map", {"max_files": 5}, cwd=root)
+            self.assertTrue(result.ok)
+            self.assertIn("Workspace Map", result.output)
 
 
 if __name__ == "__main__":

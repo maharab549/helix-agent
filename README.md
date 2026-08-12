@@ -2,7 +2,7 @@
 
 Helix Agent is a standalone CLI AI agent. It works with OpenAI-compatible chat APIs, OpenRouter, custom endpoints, and local Ollama models without depending on any other agent repo.
 
-It is designed to bring the useful ideas from larger agents into a clean independent project: persistent sessions, skills, memory, automatic learning, fine-tuning automation, local tools, autonomous tool loops, subagents, recurring prompts, project missions, plugins, workspace context, and JSONL automation.
+It is designed to bring the useful ideas from larger agents into a clean independent project: persistent sessions, skills, memory, automatic learning, fine-tuning automation, coding-agent workflows, local tools, autonomous tool loops, subagents, recurring prompts, project missions, plugins, workspace context, VS Code integration, and JSONL automation.
 
 ## What Makes Helix Different
 
@@ -15,6 +15,7 @@ The main feature is the Helix Core Loop:
 - it reads project context from files such as `AGENTS.md`, `HELIX.md`, `.helix/CONTEXT.md`, and `README.md`
 - it recalls project and global memory
 - it learns from successful interactions and can write `.helix/LEARNED.md`
+- it maps codebases, infers tests, reviews diffs, explains files, and runs fix workflows
 - it loads reusable skills
 - it can call local tools, Git tools, HTTP fetches, and plugin tools
 - it saves sessions and history so work can continue later
@@ -83,6 +84,11 @@ helix ask "your prompt"             # one-shot prompt
 helix agent "inspect this repo"      # autonomous loop with local tools
 helix agent --yes "create tests"     # allow writes/shell/python tools
 helix capabilities                  # show Helix's feature map
+helix code map
+helix code tests
+helix code review
+helix code explain helix_agent/cli.py
+helix code fix --yes "add a focused test for provider resolution"
 helix learn status
 helix learn mine-history
 helix learn dataset --min-rating 4
@@ -144,6 +150,7 @@ Available built-in tools:
 - `git_status`
 - `git_diff`
 - `http_get`
+- `workspace_map`
 - `shell`
 - `python`
 - `plugin`
@@ -207,12 +214,55 @@ helix finetune adopt <job-id> --name helix-tuned
 
 `--dry-run` validates the dataset and shows the job payload without uploading anything. Real fine-tuning requires `OPENAI_API_KEY` and can incur provider costs.
 
+## Coding Workflows
+
+Helix has first-class coding-agent commands:
+
+```powershell
+helix code map                         # summarize files, languages, entrypoints, tests, Git state
+helix code map --save                  # write .helix/workspace-index.json
+helix code tests                       # infer likely verification commands
+helix code review                      # review the workspace/diff using the agent loop
+helix code review --dry-run            # print the generated review prompt
+helix code explain helix_agent/cli.py  # explain a file
+helix code fix --yes "fix the failing tests"
+```
+
+`helix code fix` uses the autonomous local-tool loop. Reads/searches are available by default; writes, shell, Python, and plugin execution require `--yes`.
+
+## VS Code Integration
+
+The first-party VS Code extension lives in `integrations/vscode`.
+
+It adds:
+
+- `@helix` chat participant
+- `@helix /map`, `/review`, `/explain`, `/fix`, `/learn`
+- Copilot agent-mode tool reference: `#helix`
+- `Helix: Ask`
+- `Helix: Fix Selection`
+- `Helix: Rewrite Selection`
+- `Helix: Review Workspace`
+- `Helix: Explain Current File`
+- `Helix: Learning Status`
+
+Development run:
+
+```powershell
+cd integrations/vscode
+code .
+```
+
+Then press `F5` in VS Code to launch an Extension Development Host. The extension calls your local `helix` executable, so run `python -m pip install -e .` from the repo root first.
+
 ## Feature Map
 
 Already available:
 
 - provider routing for OpenAI-compatible APIs, OpenRouter, custom endpoints, and Ollama
 - one-shot ask, interactive chat, autonomous agent loop
+- codebase map, inferred test commands, review/explain/fix workflows
+- VS Code extension scaffold with chat participant and command palette actions
 - project/user/built-in skills
 - project/global memory
 - automatic learning capture with redaction, scoring, rating, and deduplication
@@ -249,6 +299,7 @@ Planned high-end layers:
 - Project learning examples: `.helix/learning/examples.jsonl`
 - Project learned profile: `.helix/LEARNED.md`
 - Project fine-tune records: `.helix/fine_tunes.json`
+- Workspace index: `.helix/workspace-index.json`
 - Project sessions: `.helix/sessions/`
 - Project memory: `.helix/memory.jsonl`
 - Project schedule: `.helix/schedule.json`

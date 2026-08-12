@@ -11,6 +11,7 @@ from . import __version__
 from .agent_runtime import build_messages as build_agent_messages
 from .agent_runtime import run_agent_loop
 from .capabilities import capability_report
+from .codeops import build_explain_prompt, build_fix_prompt, build_review_prompt, codebase_context, infer_test_commands
 from .config import init_config, load_config, save_config, set_config_value
 from .context import collect_context_blocks, format_workspace_context
 from .doctor import collect_diagnostics
@@ -39,6 +40,7 @@ from .skills import create_project_skill, find_skill, load_skill_index, read_ski
 from .subagents import run_subagents
 from .tuning import adopt_fine_tuned_model, auto_fine_tune, list_fine_tune_jobs, load_records, refresh_record, start_fine_tune
 from .tools_runtime import TOOL_DESCRIPTIONS, execute_tool
+from .workspace import save_workspace_index, scan_workspace
 
 
 COMMANDS = {
@@ -46,6 +48,7 @@ COMMANDS = {
     "ask",
     "capabilities",
     "chat",
+    "code",
     "completion",
     "config",
     "context",
@@ -102,6 +105,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     capabilities = sub.add_parser("capabilities", help="Show what makes Helix different")
     capabilities.add_argument("--json", action="store_true")
+
+    code = sub.add_parser("code", help="Codebase-aware workflows")
+    code_sub = code.add_subparsers(dest="code_command")
+    code_map = code_sub.add_parser("map")
+    code_map.add_argument("--json", action="store_true")
+    code_map.add_argument("--save", action="store_true")
+    code_review = code_sub.add_parser("review")
+    add_model_options(code_review)
+    code_review.add_argument("--dry-run", action="store_true")
+    code_review.add_argument("--timeout", type=int, default=120)
+    code_explain = code_sub.add_parser("explain")
+    add_model_options(code_explain)
+    code_explain.add_argument("--timeout", type=int, default=120)
+    code_explain.add_argument("--dry-run", action="store_true")
+    code_explain.add_argument("path")
+    code_fix = code_sub.add_parser("fix")
+    add_model_options(code_fix)
+    code_fix.add_argument("--yes", action="store_true", help="Allow writes and command execution")
+    code_fix.add_argument("--max-steps", type=int, default=8)
+    code_fix.add_argument("--timeout", type=int, default=120)
+    code_fix.add_argument("--dry-run", action="store_true")
+    code_fix.add_argument("request", nargs=argparse.REMAINDER)
+    code_sub.add_parser("tests")
 
     config = sub.add_parser("config", help="Show or update config")
     config_sub = config.add_subparsers(dest="config_command")
@@ -807,6 +833,81 @@ def run_capabilities(ns, palette: Palette) -> int:
     return 0
 
 
+def run_code_cmd(config, ns, palette: Palette) -> int:
+    if ns.code_command in {None, "map"}:
+        index = scan_workspace()
+        if getattr(ns, "save", False):
+            save_workspace_index(index)
+        if getattr(ns, "json", False):
+            print_json(index.to_json())
+        else:
+            print(codebase_context())
+        return 0
+    if ns.code_command == "tests":
+        index = scan_workspace()
+        rows = [{"command": command} for command in infer_test_commands(index)]
+        print(format_table(rows, [("command", "Command")], empty="No obvious test command inferred."))
+        return 0
+    if ns.code_command == "review":
+        prompt = build_review_prompt()
+        if ns.dry_run:
+            print(prompt)
+            return 0
+        fake_ns = argparse.Namespace(
+            prompt=[prompt],
+            system=None,
+            skill=["code-review"],
+            provider=ns.provider,
+            model=ns.model,
+            temperature=0.2,
+            timeout=ns.timeout,
+            max_steps=4,
+            yes=False,
+            no_save=False,
+        )
+        return run_agent(config, fake_ns, palette)
+    if ns.code_command == "explain":
+        prompt = build_explain_prompt(ns.path)
+        if ns.dry_run:
+            print(prompt)
+            return 0
+        fake_ns = argparse.Namespace(
+            prompt=[prompt],
+            system=None,
+            skill=[],
+            provider=ns.provider,
+            model=ns.model,
+            temperature=0.2,
+            timeout=ns.timeout,
+            no_save=False,
+            json=False,
+        )
+        return run_ask(config, fake_ns, palette)
+    if ns.code_command == "fix":
+        request = prompt_from_parts(ns.request)
+        if not request:
+            print("Fix request is required.", file=sys.stderr)
+            return 2
+        prompt = build_fix_prompt(request)
+        if ns.dry_run:
+            print(prompt)
+            return 0
+        fake_ns = argparse.Namespace(
+            prompt=[prompt],
+            system=None,
+            skill=["repo-inspector"],
+            provider=ns.provider,
+            model=ns.model,
+            temperature=0.2,
+            timeout=ns.timeout,
+            max_steps=ns.max_steps,
+            yes=ns.yes,
+            no_save=False,
+        )
+        return run_agent(config, fake_ns, palette)
+    return 2
+
+
 def run_finetune_cmd(config, ns) -> int:
     if ns.finetune_command in {None, "prepare"}:
         stats = build_dataset(
@@ -952,6 +1053,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_chat(config, ns, palette)
         if ns.command == "capabilities":
             return run_capabilities(ns, palette)
+        if ns.command == "code":
+            return run_code_cmd(config, ns, palette)
         if ns.command == "config":
             if ns.config_command in {None, "show"}:
                 print(json.dumps({

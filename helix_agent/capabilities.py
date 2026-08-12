@@ -4,7 +4,8 @@ from __future__ import annotations
 STANDOUT = (
     "Helix is an owner-controlled agent OS for the terminal: a provider-agnostic core loop "
     "that combines project context, memory, automatic learning, fine-tuning automation, "
-    "skills, tools, plugins, sessions, missions, subagents, schedules, and RPC in plain local files."
+    "coding-agent workflows, VS Code integration, skills, tools, plugins, sessions, missions, "
+    "subagents, schedules, and RPC in plain local files."
 )
 
 
@@ -26,6 +27,24 @@ CAPABILITIES = [
         "name": "Agent loop",
         "status": "available",
         "description": "XML tool-call loop with bounded steps and opt-in execution.",
+    },
+    {
+        "area": "Coding",
+        "name": "Workspace map",
+        "status": "available",
+        "description": "Indexes files, languages, entrypoints, tests, important files, and Git state.",
+    },
+    {
+        "area": "Coding",
+        "name": "Code workflows",
+        "status": "available",
+        "description": "Review, explain, infer tests, and autonomous fix prompts built on the Helix tool loop.",
+    },
+    {
+        "area": "Editor",
+        "name": "VS Code integration",
+        "status": "available",
+        "description": "First-party extension scaffold with @helix chat participant and command palette actions.",
     },
     {
         "area": "Context",
@@ -67,7 +86,7 @@ CAPABILITIES = [
         "area": "Tools",
         "name": "Local tools",
         "status": "available",
-        "description": "List, read, write, append, search, shell, Python, Git status/diff, HTTP fetch.",
+        "description": "List, read, write, append, search, shell, Python, Git status/diff, HTTP fetch, workspace map.",
     },
     {
         "area": "Tools",
@@ -113,7 +132,7 @@ CAPABILITIES = [
     },
     {
         "area": "Future",
-        "name": "Daemon, MCP, browser, TUI, registry",
+        "name": "Inline edits, daemon, MCP, browser, TUI, registry",
         "status": "planned",
         "description": "High-end layers that can now be added cleanly on top of plugins/RPC.",
     },
