@@ -240,6 +240,7 @@ It adds:
 - Helix Activity Bar icon and sidebar panel
 - right-side Helix Agent panel beside the editor
 - right-side Command Center for core, code, context, state, plugin, and fine-tuning workflows
+- LLM setup/login wizard with OpenAI, OpenRouter, Ollama, and custom endpoint support
 - `@helix /map`, `/review`, `/explain`, `/fix`, `/learn`
 - Copilot agent-mode tool reference: `#helix`
 - `Helix: Ask`
@@ -248,10 +249,16 @@ It adds:
 - `Helix: Review Workspace`
 - `Helix: Explain Current File`
 - `Helix: Learning Status`
+- `Helix: Setup LLM / Login`
+- `Helix: Setup Details`
+
+After installing the VSIX, run `Helix: Setup LLM / Login` from the Command Palette or click it in the Helix sidebar. The wizard chooses a provider, model, base URL, and API key. API keys are stored in VS Code Secret Storage and injected into the local `helix` process as `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `HELIX_API_KEY`; they are not written to the workspace. For local Ollama, choose Ollama and set the chat URL/model.
+
+Run `Helix: Setup Details` any time to inspect the active provider, model, base URL, key status, provider list, and `helix doctor` output without exposing secrets.
 
 For a right-side layout like Codex/Claude-style panels, run `Helix: Open Right Side Panel` from the Command Palette or click `Open Right Side Panel` in the Helix sidebar.
 
-The right-side panel exposes most Helix CLI groups: ask, agent, capabilities, doctor, code map/review/explain/fix/tests, context, skills, tools, providers, memory, learning, sessions, missions, schedule, history, plugins, fine-tune prepare/dry-run, and raw CLI arguments.
+The right-side panel exposes most Helix CLI groups: setup, ask, agent, capabilities, doctor, code map/review/explain/fix/tests, context, skills, tools, providers, memory, learning, sessions, missions, schedule, history, plugins, fine-tune prepare/dry-run, and raw CLI arguments.
 
 Development run:
 

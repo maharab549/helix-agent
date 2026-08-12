@@ -2,6 +2,56 @@ const vscode = require("vscode");
 const cp = require("child_process");
 
 let rightPanel;
+let extensionContext;
+
+const PROVIDER_SETUP = [
+  {
+    label: "OpenAI",
+    provider: "openai",
+    description: "OpenAI chat completions",
+    defaultModel: "gpt-4o-mini",
+    defaultBaseUrl: "https://api.openai.com/v1/chat/completions",
+    baseUrlSetting: "openaiBaseUrl",
+    apiKeyEnv: "OPENAI_API_KEY"
+  },
+  {
+    label: "OpenRouter",
+    provider: "openrouter",
+    description: "OpenRouter model gateway",
+    defaultModel: "openai/gpt-4o-mini",
+    defaultBaseUrl: "https://openrouter.ai/api/v1/chat/completions",
+    baseUrlSetting: "openrouterBaseUrl",
+    apiKeyEnv: "OPENROUTER_API_KEY"
+  },
+  {
+    label: "Ollama",
+    provider: "ollama",
+    description: "Local Ollama model",
+    defaultModel: "llama3.1",
+    defaultBaseUrl: "http://localhost:11434/api/chat",
+    baseUrlSetting: "ollamaBaseUrl",
+    apiKeyEnv: ""
+  },
+  {
+    label: "Custom OpenAI-compatible",
+    provider: "custom",
+    description: "Any OpenAI-compatible endpoint",
+    defaultModel: "gpt-4o-mini",
+    defaultBaseUrl: "https://example.com/v1/chat/completions",
+    baseUrlSetting: "customBaseUrl",
+    apiKeyEnv: "HELIX_API_KEY"
+  }
+];
+
+const PROVIDER_ENV_NAMES = [
+  "HELIX_PROVIDER",
+  "HELIX_MODEL",
+  "OPENAI_BASE_URL",
+  "OPENROUTER_BASE_URL",
+  "OLLAMA_BASE_URL",
+  "OLLAMA_MODEL",
+  "HELIX_BASE_URL"
+];
 
 function workspaceCwd() {
   const folders = vscode.workspace.workspaceFolders;
@@ -13,13 +63,70 @@ function config() {
   return {
     executable: cfg.get("executable") || "helix",
     provider: cfg.get("provider") || "",
-    model: cfg.get("model") || ""
+    model: cfg.get("model") || "",
+    openaiBaseUrl: cfg.get("openaiBaseUrl") || "",
+    openrouterBaseUrl: cfg.get("openrouterBaseUrl") || "",
+    ollamaBaseUrl: cfg.get("ollamaBaseUrl") || "",
+    customBaseUrl: cfg.get("customBaseUrl") || ""
   };
 }
 
-function runHelix(args, options = {}) {
+function providerEnvironment(cfg) {
+  const env = {};
+  if (cfg.provider) {
+    env.HELIX_PROVIDER = cfg.provider;
+  }
+  if (cfg.openaiBaseUrl) {
+    env.OPENAI_BASE_URL = cfg.openaiBaseUrl;
+  }
+  if (cfg.openrouterBaseUrl) {
+    env.OPENROUTER_BASE_URL = cfg.openrouterBaseUrl;
+  }
+  if (cfg.ollamaBaseUrl) {
+    env.OLLAMA_BASE_URL = cfg.ollamaBaseUrl;
+  }
+  if (cfg.customBaseUrl) {
+    env.HELIX_BASE_URL = cfg.customBaseUrl;
+  }
+  return env;
+}
+
+function secretStorageKey(envName) {
+  return "helix." + envName;
+}
+
+async function storedSecretEnvironment() {
+  if (!extensionContext || !extensionContext.secrets) {
+    return {};
+  }
+  const env = {};
+  for (const provider of PROVIDER_SETUP) {
+    if (!provider.apiKeyEnv) {
+      continue;
+    }
+    const value = await extensionContext.secrets.get(secretStorageKey(provider.apiKeyEnv));
+    if (value) {
+      env[provider.apiKeyEnv] = value;
+    }
+  }
+  return env;
+}
+
+async function runHelix(args, options = {}) {
+  const cfg = config();
+  const env = { ...process.env };
+  if (options.cleanProviderEnv) {
+    for (const envName of PROVIDER_ENV_NAMES) {
+      delete env[envName];
+    }
+  }
+  if (options.injectSettings !== false) {
+    Object.assign(env, providerEnvironment(cfg));
+  }
+  if (options.injectSecrets !== false) {
+    Object.assign(env, await storedSecretEnvironment());
+  }
   return new Promise((resolve, reject) => {
-    const cfg = config();
     const finalArgs = [...args];
     const nested = finalArgs[0] === "code";
     const acceptsModelFlags = ["ask", "agent", "code", "subagents"].includes(finalArgs[0]);
@@ -34,7 +141,7 @@ function runHelix(args, options = {}) {
     const child = cp.spawn(cfg.executable, finalArgs, {
       cwd: workspaceCwd(),
       shell: process.platform === "win32",
-      env: process.env
+      env
     });
     let stdout = "";
     let stderr = "";
@@ -95,6 +202,8 @@ class HelixPanelProvider {
 
   getChildren() {
     return [
+      new HelixActionItem("Setup LLM / Login", { command: "helix.setupLlm", title: "Setup LLM / Login" }, "key"),
+      new HelixActionItem("Setup Details", { command: "helix.setupDetails", title: "Setup Details" }, "settings-gear"),
       new HelixActionItem("Open Right Side Panel", { command: "helix.openRightPanel", title: "Open Right Side Panel" }, "layout-sidebar-right"),
       new HelixActionItem("Ask Helix", { command: "helix.ask", title: "Ask Helix" }, "comment-discussion"),
       new HelixActionItem("Open @helix Chat", { command: "helix.openChat", title: "Open @helix Chat" }, "sparkle"),
@@ -257,6 +366,215 @@ async function openChatCommand() {
   }
 }
 
+function providerSetupByName(name) {
+  return PROVIDER_SETUP.find(provider => provider.provider === name);
+}
+
+function displayBaseUrl(cfg, setup) {
+  return cfg[setup.baseUrlSetting] || setup.defaultBaseUrl;
+}
+
+async function showGeneratedDocument(content, language = "markdown") {
+  const doc = await vscode.workspace.openTextDocument({ content, language });
+  await vscode.window.showTextDocument(doc, { preview: true, viewColumn: vscode.ViewColumn.Beside });
+}
+
+async function updateHelixSetting(key, value) {
+  await vscode.workspace.getConfiguration("helix").update(key, value, vscode.ConfigurationTarget.Global);
+}
+
+async function runConfigSet(key, value) {
+  return runHelix(["config", "set", key, value], {
+    cleanProviderEnv: true,
+    injectSettings: false,
+    injectSecrets: false
+  });
+}
+
+async function configureCliProvider(setup, model, baseUrl) {
+  const updates = [
+    ["default-provider", setup.provider],
+    [`providers.${setup.provider}.model`, model],
+    [`providers.${setup.provider}.base-url`, baseUrl]
+  ];
+  if (setup.provider === "custom") {
+    updates.push(
+      ["providers.custom.kind", "openai-compatible"],
+      ["providers.custom.api-key-env", setup.apiKeyEnv]
+    );
+  }
+  for (const [key, value] of updates) {
+    await runConfigSet(key, value);
+  }
+}
+
+async function apiKeyStatus(envName) {
+  if (!envName) {
+    return "not required";
+  }
+  const stored = extensionContext && extensionContext.secrets
+    ? await extensionContext.secrets.get(secretStorageKey(envName))
+    : "";
+  if (stored) {
+    return "stored in VS Code Secret Storage";
+  }
+  if (process.env[envName]) {
+    return "available from VS Code's environment";
+  }
+  return "missing";
+}
+
+async function setupDetailsText() {
+  const cfg = config();
+  const activeSetup = providerSetupByName(cfg.provider) || providerSetupByName("openai");
+  const activeBaseUrl = activeSetup ? displayBaseUrl(cfg, activeSetup) : "";
+  const lines = [
+    "# Helix LLM Setup",
+    "",
+    `Workspace: ${workspaceCwd()}`,
+    `Helix executable: ${cfg.executable}`,
+    `Provider: ${cfg.provider || "(CLI default)"}`,
+    `Model: ${cfg.model || "(provider default)"}`,
+    `Active base URL: ${activeBaseUrl || "(provider default)"}`,
+    `API key: ${await apiKeyStatus(activeSetup ? activeSetup.apiKeyEnv : "")}`,
+    "",
+    "Stored keys are injected only when VS Code launches the local `helix` process. They are not written to your repository.",
+    "",
+    "## Provider Base URLs",
+    "",
+    `OpenAI: ${displayBaseUrl(cfg, providerSetupByName("openai"))}`,
+    `OpenRouter: ${displayBaseUrl(cfg, providerSetupByName("openrouter"))}`,
+    `Ollama: ${displayBaseUrl(cfg, providerSetupByName("ollama"))}`,
+    `Custom: ${displayBaseUrl(cfg, providerSetupByName("custom"))}`,
+    ""
+  ];
+  try {
+    lines.push("## Helix Providers", "", "```text", await runHelix(["providers", "list"]), "```", "");
+  } catch (error) {
+    lines.push("## Helix Providers", "", "```text", error.message, "```", "");
+  }
+  try {
+    lines.push("## Doctor", "", "```text", await runHelix(["doctor"]), "```");
+  } catch (error) {
+    lines.push("## Doctor", "", "```text", error.message, "```");
+  }
+  return lines.join("\n");
+}
+
+async function setupDetailsCommand(options = {}) {
+  const text = await setupDetailsText();
+  if (options.showDocument !== false) {
+    await showGeneratedDocument(text, "markdown");
+    vscode.window.showInformationMessage("Helix setup details loaded.");
+  }
+  return text;
+}
+
+async function setupLlmCommand(options = {}) {
+  const cfg = config();
+  const currentProvider = providerSetupByName(cfg.provider) || providerSetupByName("openai");
+  const selected = await vscode.window.showQuickPick(
+    PROVIDER_SETUP.map(provider => ({
+      label: provider.label,
+      description: provider.description,
+      detail: provider.apiKeyEnv ? `Uses ${provider.apiKeyEnv}` : "No API key required",
+      setup: provider
+    })),
+    {
+      ignoreFocusOut: true,
+      placeHolder: "Choose the LLM provider Helix should use"
+    }
+  );
+  if (!selected) {
+    return "Setup cancelled.";
+  }
+
+  const setup = selected.setup;
+  const modelInput = await vscode.window.showInputBox({
+    ignoreFocusOut: true,
+    prompt: `Model ID for ${setup.label}`,
+    value: currentProvider.provider === setup.provider && cfg.model ? cfg.model : setup.defaultModel
+  });
+  if (modelInput === undefined) {
+    return "Setup cancelled.";
+  }
+  const model = modelInput.trim() || setup.defaultModel;
+
+  const latestCfg = config();
+  const baseUrlInput = await vscode.window.showInputBox({
+    ignoreFocusOut: true,
+    prompt: `Chat completions URL for ${setup.label}`,
+    value: latestCfg[setup.baseUrlSetting] || setup.defaultBaseUrl
+  });
+  if (baseUrlInput === undefined) {
+    return "Setup cancelled.";
+  }
+  const baseUrl = baseUrlInput.trim() || setup.defaultBaseUrl;
+
+  let secretLine = "API key: not required";
+  if (setup.apiKeyEnv) {
+    const existingStatus = await apiKeyStatus(setup.apiKeyEnv);
+    const keyInput = await vscode.window.showInputBox({
+      ignoreFocusOut: true,
+      password: true,
+      prompt: `Paste ${setup.apiKeyEnv}. Leave empty to keep/use existing key.`,
+      placeHolder: existingStatus === "missing" ? "Required for remote providers" : existingStatus
+    });
+    if (keyInput === undefined) {
+      return "Setup cancelled.";
+    }
+    const trimmedKey = keyInput.trim();
+    if (trimmedKey) {
+      await extensionContext.secrets.store(secretStorageKey(setup.apiKeyEnv), trimmedKey);
+      secretLine = `API key: stored as ${setup.apiKeyEnv} in VS Code Secret Storage`;
+    } else {
+      secretLine = `API key: ${await apiKeyStatus(setup.apiKeyEnv)}`;
+    }
+  }
+
+  await updateHelixSetting("provider", setup.provider);
+  await updateHelixSetting("model", model);
+  await updateHelixSetting(setup.baseUrlSetting, baseUrl);
+
+  let cliConfigLine = "CLI config: updated";
+  try {
+    await configureCliProvider(setup, model, baseUrl);
+  } catch (error) {
+    cliConfigLine = "CLI config: " + error.message;
+  }
+
+  let doctorText;
+  try {
+    doctorText = await runHelix(["doctor"]);
+  } catch (error) {
+    doctorText = error.message;
+  }
+
+  const text = [
+    "# Helix Setup Complete",
+    "",
+    `Provider: ${setup.provider}`,
+    `Model: ${model}`,
+    `Base URL: ${baseUrl}`,
+    secretLine,
+    cliConfigLine,
+    "",
+    "## Doctor",
+    "",
+    "```text",
+    doctorText,
+    "```",
+    "",
+    "Run `Helix: Setup Details` any time to inspect this configuration without revealing API keys."
+  ].join("\n");
+
+  if (options.showDocument !== false) {
+    await showGeneratedDocument(text, "markdown");
+    vscode.window.showInformationMessage("Helix LLM setup saved.");
+  }
+  return text;
+}
+
 function rightPanelHtml(webview) {
   const scriptNonce = nonce();
   return `<!DOCTYPE html>
@@ -356,6 +674,8 @@ function rightPanelHtml(webview) {
   <div class="toolbar">
     <select id="command">
       <optgroup label="Core">
+        <option value="setup">Setup LLM / Login</option>
+        <option value="setupDetails">Setup Details</option>
         <option value="ask">Ask</option>
         <option value="agent">Agent Run</option>
         <option value="chat">Open @helix Chat</option>
@@ -397,6 +717,8 @@ function rightPanelHtml(webview) {
   </div>
   <textarea id="prompt" placeholder="Ask Helix about this workspace..."></textarea>
   <div class="actions">
+    <button data-command="setup">Setup LLM</button>
+    <button class="secondary" data-command="setupDetails">Setup Details</button>
     <button data-command="ask">Ask</button>
     <button data-command="agent">Agent Run</button>
     <button data-command="review">Review Workspace</button>
@@ -440,7 +762,23 @@ async function runRightPanelCommand(panel, message) {
   const command = message.command;
   const prompt = message.prompt || "";
   let args;
-  if (command === "review") {
+  if (command === "setup") {
+    try {
+      const text = await setupLlmCommand({ showDocument: false });
+      panel.webview.postMessage({ ok: true, text });
+    } catch (error) {
+      panel.webview.postMessage({ ok: false, text: error.message });
+    }
+    return;
+  } else if (command === "setupDetails") {
+    try {
+      const text = await setupDetailsCommand({ showDocument: false });
+      panel.webview.postMessage({ ok: true, text });
+    } catch (error) {
+      panel.webview.postMessage({ ok: false, text: error.message });
+    }
+    return;
+  } else if (command === "review") {
     args = ["code", "review"];
   } else if (command === "agent") {
     args = ["agent", prompt || "Inspect this workspace and suggest next steps."];
@@ -557,6 +895,8 @@ function registerChat(context) {
         result = await runHelix(["code", "fix", request.prompt || "Plan a safe code improvement."]);
       } else if (request.command === "learn") {
         result = await runHelix(["learn", "status"]);
+      } else if (request.command === "setup") {
+        result = await setupLlmCommand({ showDocument: false });
       } else {
         result = await runHelix(["ask", request.prompt]);
       }
@@ -606,6 +946,7 @@ function registerLanguageModelTools(context) {
 }
 
 function activate(context) {
+  extensionContext = context;
   const panelProvider = new HelixPanelProvider();
   context.subscriptions.push(vscode.window.registerTreeDataProvider("helix.panel", panelProvider));
   context.subscriptions.push(vscode.commands.registerCommand("helix.ask", askCommand));
@@ -614,6 +955,8 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("helix.reviewWorkspace", reviewWorkspaceCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.explainFile", explainFileCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.learnStatus", learnStatusCommand));
+  context.subscriptions.push(vscode.commands.registerCommand("helix.setupLlm", setupLlmCommand));
+  context.subscriptions.push(vscode.commands.registerCommand("helix.setupDetails", setupDetailsCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.openChat", openChatCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.openRightPanel", openRightPanelCommand));
   registerChat(context);

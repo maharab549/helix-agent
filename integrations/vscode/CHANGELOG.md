@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+- Add `Helix: Setup LLM / Login` for OpenAI, OpenRouter, Ollama, and custom OpenAI-compatible endpoints.
+- Store provider API keys in VS Code Secret Storage and inject them into local Helix CLI runs.
+- Add `Helix: Setup Details`, right-side panel setup actions, sidebar setup actions, and `@helix /setup`.
+
 ## 0.1.2
 
 - Expand the right-side panel into a Helix Command Center covering core, code, context, state, plugin, and fine-tuning workflows.

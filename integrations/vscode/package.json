@@ -2,7 +2,7 @@
   "name": "helix-agent-vscode",
   "displayName": "Helix Agent",
   "description": "Use Helix Agent from VS Code with chat and coding commands.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "helix-agent",
   "license": "MIT",
   "author": {
@@ -61,6 +61,8 @@
     "onCommand:helix.reviewWorkspace",
     "onCommand:helix.explainFile",
     "onCommand:helix.learnStatus",
+    "onCommand:helix.setupLlm",
+    "onCommand:helix.setupDetails",
     "onCommand:helix.openChat",
     "onCommand:helix.openRightPanel",
     "onView:helix.panel",
@@ -85,6 +87,26 @@
           "type": "string",
           "default": "",
           "description": "Optional Helix model override."
+        },
+        "helix.openaiBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional OpenAI chat completions URL. Leave empty to use Helix's default or OPENAI_BASE_URL."
+        },
+        "helix.openrouterBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional OpenRouter chat completions URL. Leave empty to use Helix's default or OPENROUTER_BASE_URL."
+        },
+        "helix.ollamaBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Ollama chat URL. Leave empty to use Helix's default or OLLAMA_BASE_URL."
+        },
+        "helix.customBaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional custom OpenAI-compatible chat completions URL. Leave empty to use Helix's default or HELIX_BASE_URL."
         }
       }
     },
@@ -112,6 +134,14 @@
       {
         "command": "helix.learnStatus",
         "title": "Helix: Learning Status"
+      },
+      {
+        "command": "helix.setupLlm",
+        "title": "Helix: Setup LLM / Login"
+      },
+      {
+        "command": "helix.setupDetails",
+        "title": "Helix: Setup Details"
       },
       {
         "command": "helix.openChat",
@@ -143,7 +173,7 @@
     "viewsWelcome": [
       {
         "view": "helix.panel",
-        "contents": "Run Helix from VS Code.\n[Open Right Side Panel](command:helix.openRightPanel)\n[Ask Helix](command:helix.ask)\n[Review Workspace](command:helix.reviewWorkspace)\n[Open Chat](command:helix.openChat)"
+        "contents": "Run Helix from VS Code.\n[Setup LLM / Login](command:helix.setupLlm)\n[Setup Details](command:helix.setupDetails)\n[Open Right Side Panel](command:helix.openRightPanel)\n[Ask Helix](command:helix.ask)\n[Review Workspace](command:helix.reviewWorkspace)\n[Open Chat](command:helix.openChat)"
       }
     ],
     "menus": {
@@ -154,14 +184,24 @@
           "group": "navigation@0"
         },
         {
-          "command": "helix.ask",
+          "command": "helix.setupLlm",
           "when": "view == helix.panel",
           "group": "navigation@1"
         },
         {
-          "command": "helix.reviewWorkspace",
+          "command": "helix.setupDetails",
           "when": "view == helix.panel",
           "group": "navigation@2"
+        },
+        {
+          "command": "helix.ask",
+          "when": "view == helix.panel",
+          "group": "navigation@3"
+        },
+        {
+          "command": "helix.reviewWorkspace",
+          "when": "view == helix.panel",
+          "group": "navigation@4"
         }
       ],
       "editor/context": [
@@ -235,6 +275,10 @@
           {
             "name": "learn",
             "description": "Show Helix learning status"
+          },
+          {
+            "name": "setup",
+            "description": "Set up or inspect Helix LLM provider login"
           }
         ],
         "disambiguation": [
