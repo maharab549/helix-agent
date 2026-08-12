@@ -45,6 +45,7 @@ Create them with:
 
 ```powershell
 helix init --project
+helix setup
 helix auth init
 helix config paths
 ```
@@ -80,6 +81,7 @@ You can also store a key without editing JSON:
 ```powershell
 helix auth set openai "sk-your-key"
 helix auth status
+helix doctor
 ```
 
 You can also run it directly from the folder:
@@ -131,6 +133,8 @@ helix chat                         # interactive chat
 helix ask "your prompt"             # one-shot prompt
 helix agent "inspect this repo"      # autonomous loop with local tools
 helix agent --yes "create tests"     # allow writes/shell/python tools
+helix setup                         # interactive provider/auth setup
+helix login openai "sk-..."          # store API key in auth.json
 helix capabilities                  # show Helix's feature map
 helix code map
 helix code tests
@@ -167,6 +171,8 @@ helix mission create --gate "pytest" "ship a clean CLI"
 helix mission run ship-a-clean-cli
 helix history
 helix rpc
+helix config paths
+helix auth status
 helix doctor --json
 ```
 

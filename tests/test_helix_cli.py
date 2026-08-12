@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import unittest
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 from helix_agent.codeops import build_explain_prompt, build_fix_prompt, infer_test_commands
+from helix_agent.cli import main
 from helix_agent.config import apply_auth_file, auth_status, init_auth_file, load_config, save_auth_key
 from helix_agent.context import collect_context_blocks, format_workspace_context
 from helix_agent.learning import (
@@ -95,6 +97,40 @@ class HelixCliTests(unittest.TestCase):
                     applied = apply_auth_file(config, overwrite=True)
                     self.assertEqual(applied["OPENAI_API_KEY"], "sk-test")
                     self.assertEqual(resolve_provider(config, None).api_key_env, "OPENAI_API_KEY")
+
+    def test_setup_command_writes_config_and_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            project = root / "project"
+            project.mkdir()
+            with patch.dict("os.environ", {"HELIX_HOME": str(home)}, clear=False):
+                previous_cwd = Path.cwd()
+                os.chdir(project)
+                try:
+                    rc = main([
+                        "setup",
+                        "--provider",
+                        "openrouter",
+                        "--model",
+                        "openai/gpt-4o-mini",
+                        "--base-url",
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        "--api-key",
+                        "sk-router",
+                        "--project",
+                        "--non-interactive",
+                        "--no-test",
+                    ])
+                finally:
+                    os.chdir(previous_cwd)
+                self.assertEqual(rc, 0)
+                config = load_config(cwd=project)
+                self.assertEqual(config.default_provider, "openrouter")
+                self.assertTrue((home / "config.toml").exists())
+                self.assertTrue((home / "auth.json").exists())
+                self.assertTrue((project / ".helix" / "config.toml").exists())
+                self.assertIn("sk-router", (home / "auth.json").read_text(encoding="utf-8"))
 
     def test_tool_call_parser(self) -> None:
         text = 'before <tool_call>{"tool":"read_file","args":{"path":"README.md"}}</tool_call> after'

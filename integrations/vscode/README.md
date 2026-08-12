@@ -35,6 +35,7 @@ Install Helix first:
 
 ```powershell
 python -m pip install -e .
+helix setup
 helix doctor
 ```
 
@@ -56,6 +57,7 @@ The CLI also supports:
 
 ```powershell
 helix init --project
+helix setup
 helix auth init
 helix auth set openai "sk-your-key"
 helix config paths

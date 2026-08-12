@@ -14,6 +14,7 @@ from .capabilities import capability_report
 from .codeops import build_explain_prompt, build_fix_prompt, build_review_prompt, codebase_context, infer_test_commands
 from .config import (
     apply_auth_file,
+    auth_environment,
     auth_status,
     init_auth_file,
     init_config,
@@ -41,7 +42,7 @@ from .learning import (
 )
 from .memory import iter_memories, remember, search_memories
 from .missions import build_mission_prompt, create_mission, list_missions, load_mission, save_mission
-from .output import Palette, format_table, print_json
+from .output import Palette, banner, format_table, print_json, status_badge
 from .plugins import PluginError, create_project_plugin, execute_plugin_tool, find_plugin, load_plugin_tools, load_plugins
 from .provider import ProviderError, complete
 from .rpc import run_rpc
@@ -75,6 +76,8 @@ COMMANDS = {
     "rpc",
     "schedule",
     "sessions",
+    "login",
+    "setup",
     "skills",
     "subagents",
     "finetune",
@@ -157,6 +160,19 @@ def build_parser() -> argparse.ArgumentParser:
     auth_set = auth_sub.add_parser("set")
     auth_set.add_argument("provider")
     auth_set.add_argument("api_key")
+
+    setup = sub.add_parser("setup", help="Interactive first-run LLM setup")
+    setup.add_argument("--provider", choices=["openai", "openrouter", "ollama", "custom"], default=None)
+    setup.add_argument("--model", default=None)
+    setup.add_argument("--base-url", default=None)
+    setup.add_argument("--api-key", default=None)
+    setup.add_argument("--project", action="store_true", help="Also create .helix/config.toml")
+    setup.add_argument("--non-interactive", action="store_true", help="Do not prompt; use defaults and supplied flags")
+    setup.add_argument("--no-test", action="store_true", help="Skip setup test guidance")
+    login = sub.add_parser("login", help="Store an API key in ~/.helix-agent/auth.json")
+    login.add_argument("provider", nargs="?", choices=["openai", "openrouter", "custom"])
+    login.add_argument("api_key", nargs="?")
+    login.add_argument("--non-interactive", action="store_true", help="Do not prompt")
 
     providers = sub.add_parser("providers", help="List providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
@@ -547,6 +563,235 @@ def print_provider_table(config) -> None:
             "key": provider.api_key_env or "-",
         })
     print(format_table(rows, [("name", "Name"), ("kind", "Kind"), ("model", "Model"), ("key", "Key Env")]))
+
+
+SETUP_DEFAULTS = {
+    "openai": {
+        "kind": "openai-compatible",
+        "model": "gpt-4o-mini",
+        "base_url": "https://api.openai.com/v1/chat/completions",
+        "api_key_env": "OPENAI_API_KEY",
+    },
+    "openrouter": {
+        "kind": "openai-compatible",
+        "model": "openai/gpt-4o-mini",
+        "base_url": "https://openrouter.ai/api/v1/chat/completions",
+        "api_key_env": "OPENROUTER_API_KEY",
+    },
+    "ollama": {
+        "kind": "ollama",
+        "model": "llama3.1",
+        "base_url": "http://localhost:11434/api/chat",
+        "api_key_env": "",
+    },
+    "custom": {
+        "kind": "openai-compatible",
+        "model": "gpt-4o-mini",
+        "base_url": "https://example.com/v1/chat/completions",
+        "api_key_env": "HELIX_API_KEY",
+    },
+}
+
+
+def prompt_choice(prompt: str, choices: list[str], *, default: str, non_interactive: bool = False) -> str:
+    if non_interactive or not sys.stdin.isatty():
+        print(f"{prompt}: {default}")
+        return default
+    print(f"{prompt}:")
+    for index, choice in enumerate(choices, start=1):
+        suffix = " default" if choice == default else ""
+        print(f"  {index}. {choice}{suffix}")
+    raw = input("> ").strip()
+    if not raw:
+        return default
+    if raw.isdigit() and 1 <= int(raw) <= len(choices):
+        return choices[int(raw) - 1]
+    return raw if raw in choices else default
+
+
+def prompt_text(prompt: str, *, default: str = "", secret: bool = False, non_interactive: bool = False) -> str:
+    suffix = f" [{default}]" if default else ""
+    if non_interactive or not sys.stdin.isatty():
+        if default:
+            print(f"{prompt}{suffix}: {default}")
+        return default
+    if secret:
+        import getpass
+
+        value = getpass.getpass(f"{prompt}{suffix}: ").strip()
+    else:
+        value = input(f"{prompt}{suffix}: ").strip()
+    return value or default
+
+
+def apply_setup_to_config(config, provider_name: str, model: str, base_url: str) -> None:
+    defaults = SETUP_DEFAULTS[provider_name]
+    set_config_value(config, "default-provider", provider_name)
+    set_config_value(config, f"providers.{provider_name}.kind", defaults["kind"])
+    set_config_value(config, f"providers.{provider_name}.model", model)
+    set_config_value(config, f"providers.{provider_name}.base-url", base_url)
+    set_config_value(config, f"providers.{provider_name}.api-key-env", defaults["api_key_env"])
+
+
+def run_login_cmd(config, ns, palette: Palette) -> int:
+    provider_name = ns.provider or prompt_choice(
+        "Choose provider",
+        ["openai", "openrouter", "custom"],
+        default="openai",
+        non_interactive=ns.non_interactive,
+    )
+    api_key = ns.api_key or prompt_text(f"API key for {provider_name}", secret=True, non_interactive=ns.non_interactive)
+    if not api_key:
+        print(palette.red("No API key provided."), file=sys.stderr)
+        return 1
+    path = save_auth_key(config, provider_name, api_key)
+    print(status_badge("saved", "ok", palette), f"Stored {provider_name} key in {path}")
+    print(palette.dim("Tip: run `helix doctor` to verify key availability."))
+    return 0
+
+
+def run_setup_cmd(config, ns, palette: Palette) -> int:
+    non_interactive = ns.non_interactive or bool(ns.provider and ns.model and ns.base_url)
+    print(banner("Helix Setup", "Configure your local agent brain, auth, and project files", palette))
+    provider_name = ns.provider or prompt_choice(
+        "Choose default provider",
+        ["openai", "openrouter", "ollama", "custom"],
+        default=config.default_provider if config.default_provider in SETUP_DEFAULTS else "openai",
+        non_interactive=non_interactive,
+    )
+    defaults = SETUP_DEFAULTS[provider_name]
+    current = config.providers.get(provider_name)
+    model = ns.model or prompt_text("Model", default=current.model if current else defaults["model"], non_interactive=non_interactive)
+    base_url = ns.base_url or prompt_text("Base URL", default=current.base_url if current else defaults["base_url"], non_interactive=non_interactive)
+
+    apply_setup_to_config(config, provider_name, model, base_url)
+    config_path = save_config(config)
+    auth_path = init_auth_file(config)
+
+    if defaults["api_key_env"]:
+        api_key = ns.api_key
+        if api_key is None:
+            existing = bool(os.environ.get(defaults["api_key_env"]) or auth_environment(config).get(defaults["api_key_env"]))
+            if not non_interactive and sys.stdin.isatty():
+                label = "API key"
+                if existing:
+                    label += " (leave empty to keep existing)"
+                api_key = prompt_text(label, secret=True)
+            else:
+                api_key = ""
+        if api_key:
+            auth_path = save_auth_key(config, provider_name, api_key)
+
+    project_path = None
+    if ns.project:
+        project_path = init_project_config(cwd=Path.cwd(), force=False)
+
+    print()
+    print(status_badge("ready", "ok", palette), f"Provider: {provider_name}")
+    print(status_badge("model", "info", palette), model)
+    print(status_badge("config", "ok", palette), str(config_path))
+    print(status_badge("auth", "ok", palette), str(auth_path))
+    if project_path:
+        print(status_badge("project", "ok", palette), str(project_path))
+    if defaults["api_key_env"] and not (os.environ.get(defaults["api_key_env"]) or auth_environment(config).get(defaults["api_key_env"])):
+        print(status_badge("auth needed", "warn", palette), f"Run `helix auth set {provider_name} \"<api-key>\"`.")
+    if not ns.no_test:
+        print()
+        print(palette.bold("Next commands"))
+        print("  helix doctor")
+        print("  helix ask \"Say hello from Helix\"")
+        if provider_name == "ollama":
+            print("  ollama serve")
+            print(f"  ollama pull {model}")
+    return 0
+
+
+def format_ready(value: bool, palette: Palette) -> str:
+    return status_badge("ok", "ok", palette) if value else status_badge("missing", "error", palette)
+
+
+def format_optional(value: bool, palette: Palette) -> str:
+    return status_badge("ok", "ok", palette) if value else status_badge("optional", "info", palette)
+
+
+def print_doctor_dashboard(data: dict, config, palette: Palette) -> None:
+    provider_name = data["default_provider"]
+    active = data["providers"].get(provider_name, {})
+    active_ok = bool(active.get("api_key_available"))
+    if active.get("kind") == "ollama":
+        active_ok = bool(active.get("local_server_available"))
+    auth_file_exists = Path(data["auth_file"]).exists()
+    config_file_exists = Path(data["config_file"]).exists()
+    project_config_exists = Path(data["project_config_file"]).exists()
+    tools_ok = all(data["tools"].get(name) for name in ("python", "git", "rg"))
+    overall_ok = config_file_exists and auth_file_exists and active_ok and tools_ok
+
+    print(banner("Helix Doctor", "Readiness dashboard for the local agent CLI", palette))
+    if overall_ok:
+        print(status_badge("ready", "ok", palette), "Helix is installed and ready.")
+    else:
+        print(status_badge("needs setup", "warn", palette), "Helix is installed; provider setup needs attention.")
+    if not active_ok:
+        print(status_badge("action", "warn", palette), f"Default provider `{provider_name}` is not ready yet.")
+    print()
+    print(palette.bold("Workspace"))
+    print(f"  Home           {palette.cyan(data['home'])}")
+    print(f"  Project        {palette.cyan(data['project_dir'])}")
+    print(f"  User config    {format_ready(config_file_exists, palette)} {data['config_file']}")
+    print(f"  Auth file      {format_ready(auth_file_exists, palette)} {data['auth_file']}")
+    print(f"  Project config {format_optional(project_config_exists, palette)} {data['project_config_file']}")
+    print()
+
+    provider_rows = []
+    for name, provider in data["providers"].items():
+        ready = bool(provider["api_key_available"])
+        auth = "env"
+        if provider.get("api_key_in_auth_file"):
+            auth = "auth.json"
+        elif not provider.get("api_key_env"):
+            auth = "local"
+        elif not ready:
+            auth = "missing"
+        if provider["kind"] == "ollama":
+            ready = bool(provider.get("local_server_available"))
+            auth = "server on" if ready else "server off"
+        provider_rows.append({
+            "active": "*" if name == provider_name else "",
+            "name": name,
+            "ready": format_ready(ready, palette),
+            "model": provider["model"],
+            "auth": auth,
+            "url": provider["base_url"],
+        })
+    print(palette.bold("Providers"))
+    print(format_table(provider_rows, [
+        ("active", ""),
+        ("name", "Name"),
+        ("ready", "Ready"),
+        ("model", "Model"),
+        ("auth", "Auth"),
+        ("url", "Endpoint"),
+    ]))
+    print()
+
+    tool_rows = [
+        {"tool": name, "status": format_ready(bool(version), palette), "version": version or "not found"}
+        for name, version in data["tools"].items()
+    ]
+    print(palette.bold("Local Tools"))
+    print(format_table(tool_rows, [("tool", "Tool"), ("status", "Status"), ("version", "Version")]))
+    print()
+
+    print(palette.bold("Next Moves"))
+    if not config_file_exists or not auth_file_exists:
+        print("  helix init --project")
+    if active.get("kind") == "ollama" and not active.get("local_server_available"):
+        print("  ollama serve")
+        print(f"  ollama pull {active.get('model', 'llama3.1')}")
+    elif not active.get("api_key_available") and active.get("api_key_env"):
+        print(f"  helix auth set {provider_name} \"<api-key>\"")
+    print("  helix setup")
+    print("  helix ask \"Say hello from Helix\"")
 
 
 def run_skills(ns) -> int:
@@ -1100,6 +1345,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 set_config_value(config, ns.key, ns.value)
                 print(save_config(config))
                 return 0
+        if ns.command == "setup":
+            return run_setup_cmd(config, ns, palette)
+        if ns.command == "login":
+            return run_login_cmd(config, ns, palette)
         if ns.command == "auth":
             if ns.auth_command in {None, "status"}:
                 print_json(auth_status(config))
@@ -1148,10 +1397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if getattr(ns, "json", False):
                 print_json(data)
             else:
-                print(palette.bold("Helix Doctor"))
-                print(f"Home: {data['home']}")
-                print(f"Project: {data['project_dir']}")
-                print_provider_table(config)
+                print_doctor_dashboard(data, config, palette)
             return 0
         if ns.command == "init":
             print(init_config(force=ns.force))
