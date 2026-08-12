@@ -6,14 +6,19 @@ import sys
 from typing import Sequence
 
 from . import __version__
+from .agent_runtime import build_messages as build_agent_messages
 from .agent_runtime import run_agent_loop
+from .capabilities import capability_report
 from .config import init_config, load_config, save_config, set_config_value
+from .context import collect_context_blocks, format_workspace_context
 from .doctor import collect_diagnostics
 from .history import list_history, save_exchange
 from .memory import iter_memories, remember, search_memories
 from .missions import build_mission_prompt, create_mission, list_missions, load_mission, save_mission
 from .output import Palette, format_table, print_json
+from .plugins import PluginError, create_project_plugin, execute_plugin_tool, find_plugin, load_plugin_tools, load_plugins
 from .provider import ProviderError, complete
+from .rpc import run_rpc
 from .scheduler import add_job, load_jobs, remove_job, run_due_jobs
 from .sessions import create_session, export_markdown, list_sessions, load_session
 from .skills import create_project_skill, find_skill, load_skill_index, read_skill, save_index, search_skills
@@ -24,15 +29,19 @@ from .tools_runtime import TOOL_DESCRIPTIONS, execute_tool
 COMMANDS = {
     "agent",
     "ask",
+    "capabilities",
     "chat",
     "completion",
     "config",
+    "context",
     "doctor",
     "history",
     "init",
     "memory",
     "mission",
+    "plugins",
     "providers",
+    "rpc",
     "schedule",
     "sessions",
     "skills",
@@ -74,6 +83,9 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--system", default=None)
     chat.add_argument("--temperature", type=float, default=0.2)
 
+    capabilities = sub.add_parser("capabilities", help="Show what makes Helix different")
+    capabilities.add_argument("--json", action="store_true")
+
     config = sub.add_parser("config", help="Show or update config")
     config_sub = config.add_subparsers(dest="config_command")
     config_sub.add_parser("show")
@@ -84,6 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
     providers = sub.add_parser("providers", help="List providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
     providers_sub.add_parser("list")
+
+    context = sub.add_parser("context", help="Show workspace context Helix will load")
+    context_sub = context.add_subparsers(dest="context_command")
+    context_show = context_sub.add_parser("show")
+    context_show.add_argument("--max-chars", type=int, default=12000)
+    context_show.add_argument("--json", action="store_true")
 
     skills = sub.add_parser("skills", help="List, search, show, or create skills")
     skills_sub = skills.add_subparsers(dest="skills_command")
@@ -154,6 +172,22 @@ def build_parser() -> argparse.ArgumentParser:
     tools_run.add_argument("tool")
     tools_run.add_argument("args_json", nargs="?")
 
+    plugins = sub.add_parser("plugins", help="Manage Helix plugins")
+    plugins_sub = plugins.add_subparsers(dest="plugins_command")
+    plugins_list = plugins_sub.add_parser("list")
+    plugins_list.add_argument("--json", action="store_true")
+    plugins_tools = plugins_sub.add_parser("tools")
+    plugins_tools.add_argument("--json", action="store_true")
+    plugins_show = plugins_sub.add_parser("show")
+    plugins_show.add_argument("name")
+    plugins_create = plugins_sub.add_parser("create")
+    plugins_create.add_argument("name")
+    plugins_create.add_argument("description", nargs=argparse.REMAINDER)
+    plugins_run = plugins_sub.add_parser("run")
+    plugins_run.add_argument("--yes", action="store_true", help="Required to execute plugin commands")
+    plugins_run.add_argument("tool")
+    plugins_run.add_argument("args_json", nargs="?")
+
     subagents = sub.add_parser("subagents", help="Run parallel focused subagents")
     add_model_options(subagents)
     subagents.add_argument("--task", action="append", default=[], help="name=prompt; repeatable")
@@ -182,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     completion = sub.add_parser("completion")
     completion.add_argument("shell", choices=["bash", "zsh", "powershell"])
+    sub.add_parser("rpc", help="Run JSONL RPC on stdin/stdout")
     sub.add_parser("version")
     return parser
 
@@ -211,13 +246,15 @@ def prompt_from_parts(parts: Sequence[str]) -> str:
 
 
 def build_messages(config, prompt: str, *, system: str | None, skill_queries: list[str]) -> list[dict[str, str]]:
-    system_parts = [system or config.system_prompt]
-    entries = load_skill_index()
-    for query in skill_queries:
-        entry = find_skill(entries, query)
-        if entry:
-            system_parts.append(f"\nSkill: {entry.name}\n{read_skill(entry)}")
-    return [{"role": "system", "content": "\n\n".join(system_parts)}, {"role": "user", "content": prompt}]
+    return build_agent_messages(
+        config,
+        prompt,
+        system=system,
+        skill_queries=skill_queries,
+        include_tools=False,
+        include_memory=True,
+        include_context=True,
+    )
 
 
 def run_ask(config, ns, palette: Palette) -> int:
@@ -316,7 +353,7 @@ def handle_chat_command(command: str, messages: list[dict[str, str]], config, pa
     verb = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
     if verb == "/help":
-        print("/help, /exit, /clear, /skills [query], /use <query>, /providers, /remember <text>, /recall [query], /tools")
+        print("/help, /exit, /clear, /context, /skills [query], /use <query>, /providers, /remember <text>, /recall [query], /tools")
         return True
     if verb == "/clear":
         del messages[1:]
@@ -324,6 +361,10 @@ def handle_chat_command(command: str, messages: list[dict[str, str]], config, pa
         return True
     if verb == "/providers":
         print_provider_table(config)
+        return True
+    if verb == "/context":
+        text = format_workspace_context()
+        print(text or "No workspace context files found.")
         return True
     if verb == "/tools":
         print(format_table(
@@ -407,6 +448,15 @@ def run_skills(ns) -> int:
         print(path)
         return 0
     return 2
+
+
+def run_context(ns) -> int:
+    max_chars = getattr(ns, "max_chars", 12000)
+    if getattr(ns, "json", False):
+        print_json([block.to_json() for block in collect_context_blocks(max_chars=max_chars)])
+    else:
+        print(format_workspace_context(max_chars=max_chars) or "No workspace context files found.")
+    return 0
 
 
 def run_mission(config, ns, palette: Palette) -> int:
@@ -531,6 +581,79 @@ def run_tools(ns) -> int:
     return 2
 
 
+def run_plugins(ns) -> int:
+    if ns.plugins_command in {None, "list"}:
+        plugins = load_plugins()
+        if getattr(ns, "json", False):
+            print_json([plugin.to_json() for plugin in plugins])
+        else:
+            rows = [
+                {
+                    "source": plugin.source,
+                    "name": plugin.name,
+                    "version": plugin.version,
+                    "tools": len(plugin.tools),
+                    "description": plugin.description,
+                }
+                for plugin in plugins
+            ]
+            print(format_table(rows, [("source", "Source"), ("name", "Name"), ("version", "Version"), ("tools", "Tools"), ("description", "Description")]))
+        return 0
+    if ns.plugins_command == "tools":
+        tools = load_plugin_tools()
+        if ns.json:
+            print_json([tool.to_json() for tool in tools])
+        else:
+            rows = [
+                {"source": tool.source, "tool": tool.full_name, "description": tool.description}
+                for tool in tools
+            ]
+            print(format_table(rows, [("source", "Source"), ("tool", "Tool"), ("description", "Description")]))
+        return 0
+    if ns.plugins_command == "show":
+        plugin = find_plugin(ns.name)
+        if plugin is None:
+            print("No matching plugin.", file=sys.stderr)
+            return 1
+        print_json(plugin.to_json())
+        return 0
+    if ns.plugins_command == "create":
+        description = prompt_from_parts(ns.description) or "Project plugin for Helix Agent."
+        print(create_project_plugin(ns.name, description))
+        return 0
+    if ns.plugins_command == "run":
+        if not ns.yes:
+            print("Plugin execution requires --yes.", file=sys.stderr)
+            return 2
+        args = json.loads(ns.args_json) if ns.args_json else {}
+        if not isinstance(args, dict):
+            print("Plugin args must be a JSON object.", file=sys.stderr)
+            return 2
+        try:
+            result = execute_plugin_tool(ns.tool, args)
+        except PluginError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(result.output)
+        return 0 if result.ok else 1
+    return 2
+
+
+def run_capabilities(ns, palette: Palette) -> int:
+    report = capability_report()
+    if getattr(ns, "json", False):
+        print_json(report)
+        return 0
+    print(palette.bold("Helix Standout"))
+    print(report["standout"])
+    print()
+    print(format_table(
+        list(report["capabilities"]),
+        [("area", "Area"), ("name", "Capability"), ("status", "Status"), ("description", "Description")],
+    ))
+    return 0
+
+
 def run_subagents_cmd(config, ns) -> int:
     tasks: list[tuple[str, str]] = []
     for raw in ns.task:
@@ -616,6 +739,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_agent(config, ns, palette)
         if ns.command == "chat":
             return run_chat(config, ns, palette)
+        if ns.command == "capabilities":
+            return run_capabilities(ns, palette)
         if ns.command == "config":
             if ns.config_command in {None, "show"}:
                 print(json.dumps({
@@ -633,6 +758,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if ns.command == "providers":
             print_provider_table(config)
             return 0
+        if ns.command == "context":
+            return run_context(ns)
         if ns.command == "skills":
             return run_skills(ns)
         if ns.command == "mission":
@@ -643,6 +770,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_memory(ns)
         if ns.command == "tools":
             return run_tools(ns)
+        if ns.command == "plugins":
+            return run_plugins(ns)
         if ns.command == "subagents":
             return run_subagents_cmd(config, ns)
         if ns.command == "schedule":
@@ -671,7 +800,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if ns.command == "completion":
             print(completion_script(ns.shell))
             return 0
+        if ns.command == "rpc":
+            return run_rpc(config)
     except ProviderError as exc:
+        print(palette.red(str(exc)), file=sys.stderr)
+        return 1
+    except (OSError, ValueError) as exc:
         print(palette.red(str(exc)), file=sys.stderr)
         return 1
     except KeyboardInterrupt:

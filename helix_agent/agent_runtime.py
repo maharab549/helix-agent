@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import AgentConfig
+from .context import format_workspace_context
 from .memory import format_memory_context
 from .provider import ChatResult, complete
 from .sessions import Session, append_message, create_session, save_session
@@ -28,14 +29,21 @@ def build_messages(
     skill_queries: list[str] | None = None,
     include_tools: bool = False,
     include_memory: bool = True,
+    include_context: bool = True,
+    cwd: Path | None = None,
 ) -> list[dict[str, str]]:
+    root = cwd or Path.cwd()
     system_parts = [system or config.system_prompt]
+    if include_context:
+        workspace_context = format_workspace_context(cwd=root)
+        if workspace_context:
+            system_parts.append(workspace_context)
     if include_memory:
-        memory_context = format_memory_context(prompt)
+        memory_context = format_memory_context(prompt, cwd=root)
         if memory_context:
             system_parts.append(memory_context)
     if include_tools:
-        system_parts.append(tools_system_prompt())
+        system_parts.append(tools_system_prompt(cwd=root))
     entries = load_skill_index()
     for query in skill_queries or []:
         entry = find_skill(entries, query)

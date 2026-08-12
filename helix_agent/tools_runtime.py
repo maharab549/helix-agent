@@ -6,11 +6,14 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .memory import remember, search_memories
+from .plugins import PluginError, execute_plugin_tool, format_plugin_tools_prompt
 
 
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
@@ -33,14 +36,18 @@ TOOL_DESCRIPTIONS = {
     "write_file": "Write a UTF-8 text file. Requires --yes. args: {path: string, content: string}",
     "append_file": "Append text to a UTF-8 file. Requires --yes. args: {path: string, content: string}",
     "search_files": "Search files by regex. args: {pattern: string, path?: string, max_results?: number}",
+    "git_status": "Show concise Git status for the workspace. args: {}",
+    "git_diff": "Show Git diff. args: {path?: string, cached?: boolean, max_chars?: number}",
+    "http_get": "Fetch text from an HTTP(S) URL. args: {url: string, max_chars?: number}",
     "shell": "Run a shell command. Requires --yes. args: {command: string, timeout?: number}",
     "python": "Run a short Python snippet. Requires --yes. args: {code: string, timeout?: number}",
+    "plugin": "Run an installed Helix plugin tool. Requires --yes. args: {name: string, args?: object}",
     "remember": "Save memory. args: {text: string, scope?: 'project'|'global', tags?: string[]}",
     "recall": "Search memory. args: {query: string, limit?: number}",
 }
 
 
-def tools_system_prompt() -> str:
+def tools_system_prompt(*, cwd: Path | None = None) -> str:
     lines = [
         "You can use local tools by replying with one or more XML-wrapped JSON tool calls.",
         "Use this exact format and no markdown fences:",
@@ -48,6 +55,9 @@ def tools_system_prompt() -> str:
         "Available tools:",
     ]
     lines.extend(f"- {name}: {description}" for name, description in TOOL_DESCRIPTIONS.items())
+    plugin_prompt = format_plugin_tools_prompt(cwd=cwd)
+    if plugin_prompt:
+        lines.append(plugin_prompt)
     lines.append("After a tool result is returned, continue normally or call another tool.")
     return "\n".join(lines)
 
@@ -147,6 +157,40 @@ def execute_tool(
                     continue
             return ToolResult(name, True, "\n".join(found) or "(no matches)")
 
+        if name == "git_status":
+            result = subprocess.run(["git", "status", "--short"], cwd=str(root), capture_output=True, text=True, timeout=20)
+            output = result.stdout.strip() or result.stderr.strip() or "(clean)"
+            return ToolResult(name, result.returncode == 0, output)
+
+        if name == "git_diff":
+            max_chars = int(args.get("max_chars") or 20000)
+            command = ["git", "diff"]
+            if bool(args.get("cached")):
+                command.append("--cached")
+            path_arg = args.get("path")
+            if path_arg:
+                command.extend(["--", str(path_arg)])
+            result = subprocess.run(command, cwd=str(root), capture_output=True, text=True, timeout=30)
+            output = result.stdout if result.stdout else result.stderr
+            suffix = "\n[truncated]" if len(output) > max_chars else ""
+            return ToolResult(name, result.returncode == 0, (output[:max_chars] + suffix).strip() or "(no diff)")
+
+        if name == "http_get":
+            url = str(args["url"])
+            if not url.startswith(("http://", "https://")):
+                return ToolResult(name, False, "Only http:// and https:// URLs are supported.")
+            max_chars = int(args.get("max_chars") or 20000)
+            request = urllib.request.Request(url, headers={"User-Agent": "helix-agent/0.1"})
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    content_type = response.headers.get("Content-Type", "")
+                    body = response.read(max_chars + 1)
+            except urllib.error.URLError as exc:
+                return ToolResult(name, False, f"Could not fetch URL: {exc.reason}")
+            text = body.decode("utf-8", errors="replace")
+            suffix = "\n[truncated]" if len(text) > max_chars else ""
+            return ToolResult(name, True, f"Content-Type: {content_type}\n\n{text[:max_chars]}{suffix}")
+
         if name == "shell":
             if not allow_shell:
                 return ToolResult(name, False, "Shell commands require --yes.")
@@ -176,6 +220,18 @@ def execute_tool(
                 result.stderr,
             ]).strip()
             return ToolResult(name, result.returncode == 0, output)
+
+        if name == "plugin":
+            if not allow_shell:
+                return ToolResult(name, False, "Plugin tools require --yes.")
+            plugin_args = args.get("args") or {}
+            if not isinstance(plugin_args, dict):
+                return ToolResult(name, False, "Plugin args must be a JSON object.")
+            try:
+                result = execute_plugin_tool(str(args["name"]), plugin_args, cwd=root)
+            except PluginError as exc:
+                return ToolResult(name, False, str(exc))
+            return ToolResult(name, result.ok, result.output)
 
         if name == "remember":
             text = str(args["text"])
