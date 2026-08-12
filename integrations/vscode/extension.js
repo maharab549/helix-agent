@@ -1,6 +1,8 @@
 const vscode = require("vscode");
 const cp = require("child_process");
 
+let rightPanel;
+
 function workspaceCwd() {
   const folders = vscode.workspace.workspaceFolders;
   return folders && folders.length ? folders[0].uri.fsPath : process.cwd();
@@ -60,6 +62,15 @@ function outputChannel() {
   return vscode.window.createOutputChannel("Helix Agent");
 }
 
+function nonce() {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let value = "";
+  for (let i = 0; i < 32; i += 1) {
+    value += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return value;
+}
+
 class HelixActionItem extends vscode.TreeItem {
   constructor(label, command, icon) {
     super(label, vscode.TreeItemCollapsibleState.None);
@@ -84,6 +95,7 @@ class HelixPanelProvider {
 
   getChildren() {
     return [
+      new HelixActionItem("Open Right Side Panel", { command: "helix.openRightPanel", title: "Open Right Side Panel" }, "layout-sidebar-right"),
       new HelixActionItem("Ask Helix", { command: "helix.ask", title: "Ask Helix" }, "comment-discussion"),
       new HelixActionItem("Open @helix Chat", { command: "helix.openChat", title: "Open @helix Chat" }, "sparkle"),
       new HelixActionItem("Review Workspace", { command: "helix.reviewWorkspace", title: "Review Workspace" }, "search"),
@@ -245,6 +257,168 @@ async function openChatCommand() {
   }
 }
 
+function rightPanelHtml(webview) {
+  const scriptNonce = nonce();
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${scriptNonce}';">
+  <title>Helix Agent</title>
+  <style>
+    body {
+      font-family: var(--vscode-font-family);
+      color: var(--vscode-foreground);
+      background: var(--vscode-editor-background);
+      margin: 0;
+      padding: 14px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .title {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .status {
+      color: var(--vscode-descriptionForeground);
+      font-size: 12px;
+    }
+    textarea {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 120px;
+      resize: vertical;
+      color: var(--vscode-input-foreground);
+      background: var(--vscode-input-background);
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 4px;
+      padding: 10px;
+      font-family: var(--vscode-editor-font-family);
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin: 10px 0;
+    }
+    button {
+      border: 0;
+      border-radius: 4px;
+      padding: 8px;
+      color: var(--vscode-button-foreground);
+      background: var(--vscode-button-background);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button.secondary {
+      color: var(--vscode-button-secondaryForeground);
+      background: var(--vscode-button-secondaryBackground);
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      min-height: 180px;
+      padding: 10px;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      background: var(--vscode-textCodeBlock-background);
+      font-family: var(--vscode-editor-font-family);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">Helix Agent</div>
+    <div class="status" id="status">Ready</div>
+  </div>
+  <textarea id="prompt" placeholder="Ask Helix about this workspace..."></textarea>
+  <div class="actions">
+    <button data-command="ask">Ask</button>
+    <button data-command="review">Review Workspace</button>
+    <button class="secondary" data-command="map">Map Workspace</button>
+    <button class="secondary" data-command="tests">Infer Tests</button>
+    <button class="secondary" data-command="explain">Explain File</button>
+    <button class="secondary" data-command="learn">Learning Status</button>
+  </div>
+  <pre id="output">Helix output will appear here.</pre>
+  <script nonce="${scriptNonce}">
+    const vscode = acquireVsCodeApi();
+    const prompt = document.getElementById("prompt");
+    const output = document.getElementById("output");
+    const status = document.getElementById("status");
+    document.querySelectorAll("button[data-command]").forEach(button => {
+      button.addEventListener("click", () => {
+        status.textContent = "Running...";
+        output.textContent = "Running Helix...";
+        vscode.postMessage({ command: button.dataset.command, prompt: prompt.value });
+      });
+    });
+    window.addEventListener("message", event => {
+      const message = event.data;
+      status.textContent = message.ok ? "Ready" : "Error";
+      output.textContent = message.text || "";
+    });
+  </script>
+</body>
+</html>`;
+}
+
+async function runRightPanelCommand(panel, message) {
+  const command = message.command;
+  const prompt = message.prompt || "";
+  let args;
+  if (command === "review") {
+    args = ["code", "review"];
+  } else if (command === "map") {
+    args = ["code", "map"];
+  } else if (command === "tests") {
+    args = ["code", "tests"];
+  } else if (command === "explain") {
+    const path = activeRelativePath();
+    args = path ? ["code", "explain", path] : ["ask", "Explain the current workspace."];
+  } else if (command === "learn") {
+    args = ["learn", "status"];
+  } else {
+    args = ["ask", prompt || "Summarize this workspace."];
+  }
+  try {
+    const text = await runHelix(args);
+    panel.webview.postMessage({ ok: true, text });
+  } catch (error) {
+    panel.webview.postMessage({ ok: false, text: error.message });
+  }
+}
+
+function openRightPanelCommand() {
+  if (rightPanel) {
+    rightPanel.reveal(vscode.ViewColumn.Beside);
+    return;
+  }
+  rightPanel = vscode.window.createWebviewPanel(
+    "helixRightPanel",
+    "Helix Agent",
+    vscode.ViewColumn.Beside,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true
+    }
+  );
+  rightPanel.iconPath = new vscode.ThemeIcon("sparkle");
+  rightPanel.webview.html = rightPanelHtml(rightPanel.webview);
+  rightPanel.webview.onDidReceiveMessage(message => runRightPanelCommand(rightPanel, message));
+  rightPanel.onDidDispose(() => {
+    rightPanel = undefined;
+  });
+}
+
 function registerChat(context) {
   if (!vscode.chat || !vscode.chat.createChatParticipant) {
     return;
@@ -322,6 +496,7 @@ function activate(context) {
   context.subscriptions.push(vscode.commands.registerCommand("helix.explainFile", explainFileCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.learnStatus", learnStatusCommand));
   context.subscriptions.push(vscode.commands.registerCommand("helix.openChat", openChatCommand));
+  context.subscriptions.push(vscode.commands.registerCommand("helix.openRightPanel", openRightPanelCommand));
   registerChat(context);
   registerLanguageModelTools(context);
 }

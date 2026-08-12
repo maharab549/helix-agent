@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Add right-side Helix Agent webview panel for a Codex/Claude-style layout beside the editor.
+
 ## 0.1.0
 
 - Add Helix Activity Bar icon and sidebar panel with quick actions.

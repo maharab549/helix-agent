@@ -238,6 +238,7 @@ It adds:
 
 - `@helix` chat participant
 - Helix Activity Bar icon and sidebar panel
+- right-side Helix Agent panel beside the editor
 - `@helix /map`, `/review`, `/explain`, `/fix`, `/learn`
 - Copilot agent-mode tool reference: `#helix`
 - `Helix: Ask`
@@ -246,6 +247,8 @@ It adds:
 - `Helix: Review Workspace`
 - `Helix: Explain Current File`
 - `Helix: Learning Status`
+
+For a right-side layout like Codex/Claude-style panels, run `Helix: Open Right Side Panel` from the Command Palette or click `Open Right Side Panel` in the Helix sidebar.
 
 Development run:
 

@@ -2,7 +2,7 @@
   "name": "helix-agent-vscode",
   "displayName": "Helix Agent",
   "description": "Use Helix Agent from VS Code with chat and coding commands.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "helix-agent",
   "license": "MIT",
   "author": {
@@ -61,6 +61,8 @@
     "onCommand:helix.reviewWorkspace",
     "onCommand:helix.explainFile",
     "onCommand:helix.learnStatus",
+    "onCommand:helix.openChat",
+    "onCommand:helix.openRightPanel",
     "onView:helix.panel",
     "onLanguageModelTool:helix_workspace"
   ],
@@ -114,6 +116,10 @@
       {
         "command": "helix.openChat",
         "title": "Helix: Open Chat"
+      },
+      {
+        "command": "helix.openRightPanel",
+        "title": "Helix: Open Right Side Panel"
       }
     ],
     "viewsContainers": {
@@ -137,11 +143,16 @@
     "viewsWelcome": [
       {
         "view": "helix.panel",
-        "contents": "Run Helix from VS Code.\n[Ask Helix](command:helix.ask)\n[Review Workspace](command:helix.reviewWorkspace)\n[Open Chat](command:helix.openChat)"
+        "contents": "Run Helix from VS Code.\n[Open Right Side Panel](command:helix.openRightPanel)\n[Ask Helix](command:helix.ask)\n[Review Workspace](command:helix.reviewWorkspace)\n[Open Chat](command:helix.openChat)"
       }
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "helix.openRightPanel",
+          "when": "view == helix.panel",
+          "group": "navigation@0"
+        },
         {
           "command": "helix.ask",
           "when": "view == helix.panel",
